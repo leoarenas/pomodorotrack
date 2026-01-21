@@ -1,0 +1,186 @@
+{
+  "project_name": "PomodoroTrack",
+  "design_philosophy": {
+    "identity": "E1: The Anti-AI Designer",
+    "core_principles": [
+      "Fusion over Imitation: Mix corporate precision with energetic accents.",
+      "Emotion First: The user should feel 'Productive Clarity'.",
+      "Content is King: Every screen tells a story of efficiency.",
+      "Zoom In: Focus on the timer and the data.",
+      "Negative Space: Use white space to reduce cognitive load."
+    ],
+    "anti_patterns": [
+      "No generic full-screen gradients.",
+      "No 'Inter' for headings (Use Plus Jakarta Sans).",
+      "No center-aligned text blocks longer than 3 lines.",
+      "No default 'Vercel' look - customize the radius and shadows."
+    ]
+  },
+  "typography": {
+    "headings": {
+      "font_family": "Plus Jakarta Sans, sans-serif",
+      "weights": ["600", "700", "800"],
+      "usage": "All page titles, section headers, and modal titles.",
+      "letter_spacing": "-0.02em"
+    },
+    "body": {
+      "font_family": "Inter, sans-serif",
+      "weights": ["400", "500"],
+      "usage": "Paragraphs, inputs, table data, labels.",
+      "letter_spacing": "normal"
+    },
+    "mono": {
+      "font_family": "JetBrains Mono, monospace",
+      "usage": "Timer display, code snippets, API keys."
+    }
+  },
+  "colors": {
+    "theme": "light",
+    "palette": {
+      "primary": {
+        "name": "Magenta Energy",
+        "hex": "#E91E63",
+        "hsl": "339 82% 52%",
+        "usage": "Primary buttons, active states, progress bars, key highlights."
+      },
+      "background": {
+        "name": "Corporate White",
+        "hex": "#FFFFFF",
+        "hsl": "0 0% 100%",
+        "usage": "Main page background."
+      },
+      "surface": {
+        "name": "Off-White / Light Gray",
+        "hex": "#F8F9FA",
+        "hsl": "210 40% 98%",
+        "usage": "Sidebar background, card backgrounds (subtle)."
+      },
+      "foreground": {
+        "name": "Deep Obsidian",
+        "hex": "#0A0A0A",
+        "hsl": "0 0% 4%",
+        "usage": "Headings, main text."
+      },
+      "muted": {
+        "name": "Slate Gray",
+        "hex": "#64748B",
+        "hsl": "215 16% 47%",
+        "usage": "Secondary text, icons, borders."
+      },
+      "success": {
+        "name": "Emerald",
+        "hex": "#10B981",
+        "hsl": "151 84% 39%",
+        "usage": "Completed tasks, positive trends."
+      },
+      "warning": {
+        "name": "Amber",
+        "hex": "#F59E0B",
+        "hsl": "38 92% 50%",
+        "usage": "Break time, warnings."
+      }
+    },
+    "css_variables_update": {
+      "root": {
+        "--background": "0 0% 100%",
+        "--foreground": "0 0% 4%",
+        "--primary": "339 82% 52%",
+        "--primary-foreground": "0 0% 100%",
+        "--muted": "210 40% 96.1%",
+        "--muted-foreground": "215 16% 47%",
+        "--border": "214 32% 91%",
+        "--input": "214 32% 91%",
+        "--ring": "339 82% 52%",
+        "--radius": "0.5rem"
+      }
+    }
+  },
+  "layout_strategy": {
+    "dashboard": {
+      "type": "Bento Grid (High Density)",
+      "structure": "Sidebar (Left, Fixed) + Header (Top) + Main Content (Scrollable)",
+      "grid_cols": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4",
+      "gap": "gap-6",
+      "rules": [
+        "Timer Widget: col-span-full md:col-span-2 row-span-2 (Hero of the dashboard)",
+        "Stats Cards: col-span-1 (Small metrics)",
+        "Project List: col-span-2 row-span-2 (Tall list)",
+        "Activity Feed: col-span-1 row-span-2 (Vertical list)"
+      ]
+    },
+    "landing_page": {
+      "type": "Tetris Grid (Asymmetric)",
+      "structure": "Hero Section + Features Grid + Pricing + Footer",
+      "hero_alignment": "Left aligned text, Right aligned hero image (or 3D element)",
+      "rules": [
+        "Use generous padding (py-20 or py-32) between sections.",
+        "Do not center everything. Use asymmetry to create tension."
+      ]
+    }
+  },
+  "components": {
+    "buttons": {
+      "style": "Sharp or slightly rounded (rounded-md).",
+      "primary": "bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg hover:shadow-xl transition-all duration-300",
+      "secondary": "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+      "ghost": "hover:bg-accent hover:text-accent-foreground"
+    },
+    "cards": {
+      "style": "Flat with subtle border, no shadow by default. Hover: lift and shadow.",
+      "classes": "bg-card text-card-foreground border border-border rounded-lg hover:-translate-y-1 hover:shadow-md transition-all duration-300"
+    },
+    "inputs": {
+      "style": "Clean, minimal borders.",
+      "classes": "h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    },
+    "timer": {
+      "style": "Massive, central, digital.",
+      "font": "font-mono text-6xl md:text-8xl font-bold tracking-tighter text-foreground"
+    }
+  },
+  "visual_assets": {
+    "images": [
+      {
+        "category": "hero_background",
+        "url": "https://images.pexels.com/photos/5257575/pexels-photo-5257575.jpeg",
+        "description": "Professional team collaborating in a modern office. Use as hero image or section background with overlay."
+      },
+      {
+        "category": "feature_focus",
+        "url": "https://images.pexels.com/photos/19238353/pexels-photo-19238353.jpeg",
+        "description": "Minimalist desk setup. Use for 'Focus Mode' feature section."
+      },
+      {
+        "category": "team_meeting",
+        "url": "https://images.pexels.com/photos/6238174/pexels-photo-6238174.jpeg",
+        "description": "Team meeting. Use for 'Company Management' feature section."
+      }
+    ],
+    "icons": {
+      "library": "lucide-react",
+      "style": "Stroke width 1.5px or 2px. Color: Muted foreground or Primary."
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure text meets WCAG AA standards. Magenta text on white must be large or bold.",
+    "motion": "Respect prefers-reduced-motion.",
+    "testing": "All interactive elements must have data-testid attributes (e.g., data-testid='start-timer-btn')."
+  },
+  "instructions_to_main_agent": [
+    "1. UPDATE /app/frontend/src/index.css with the CSS variables provided in 'colors.css_variables_update'.",
+    "2. INSTALL 'lucide-react' and 'sonner' if not present.",
+    "3. USE 'Plus Jakarta Sans' for all headings. Import it from Google Fonts in index.css.",
+    "4. IMPLEMENT the Dashboard using the 'Bento Grid' layout strategy.",
+    "5. ENSURE all text is in SPANISH (Español).",
+    "6. CREATE a 'Timer' component that is visually dominant.",
+    "7. USE the provided image URLs for the Landing Page.",
+    "8. DO NOT use gradients for backgrounds. Keep it clean and flat."
+  ],
+  "universal_guidelines": [
+    "Avoid 'AI Slop' aesthetics (generic centered layouts).",
+    "Use 2-3x more spacing than typical designs.",
+    "Every interaction needs micro-animations.",
+    "Use 'sonner' for toasts.",
+    "Components must use named exports."
+  ]
+}
