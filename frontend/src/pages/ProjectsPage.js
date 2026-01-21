@@ -25,8 +25,7 @@ import {
   MoreVertical, 
   Pencil, 
   Trash2, 
-  FolderOpen,
-  Palette
+  FolderOpen
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -48,6 +47,7 @@ export const ProjectsPage = () => {
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formColor, setFormColor] = useState('#E91E63');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     loadProjects();
@@ -72,6 +72,8 @@ export const ProjectsPage = () => {
 
   const handleCreate = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     
     try {
       await projectsApi.create({
@@ -86,17 +88,19 @@ export const ProjectsPage = () => {
     } catch (error) {
       const errorMsg = error.response?.data?.detail || 'Error al crear proyecto';
       toast.error(errorMsg);
-      // Close modal on error to prevent UI blocking
       if (error.response?.status === 400) {
         setIsCreateOpen(false);
         resetForm();
       }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleEdit = async (e) => {
     e.preventDefault();
-    if (!editingProject) return;
+    if (!editingProject || isSubmitting) return;
+    setIsSubmitting(true);
     
     try {
       await projectsApi.update(editingProject.projectId, {
@@ -111,6 +115,8 @@ export const ProjectsPage = () => {
       loadProjects();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Error al actualizar proyecto');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -134,54 +140,18 @@ export const ProjectsPage = () => {
     setIsEditOpen(true);
   };
 
-  const ProjectForm = ({ onSubmit, submitLabel }) => (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="project-name">Nombre del proyecto</Label>
-        <Input
-          id="project-name"
-          data-testid="project-name-input"
-          value={formName}
-          onChange={(e) => setFormName(e.target.value)}
-          placeholder="Mi proyecto"
-          required
-        />
-      </div>
-      
-      <div className="space-y-2">
-        <Label htmlFor="project-description">Descripción (opcional)</Label>
-        <Textarea
-          id="project-description"
-          data-testid="project-description-input"
-          value={formDescription}
-          onChange={(e) => setFormDescription(e.target.value)}
-          placeholder="Describe tu proyecto..."
-          rows={3}
-        />
-      </div>
-      
-      <div className="space-y-2">
-        <Label>Color</Label>
-        <div className="flex flex-wrap gap-2">
-          {PROJECT_COLORS.map(color => (
-            <button
-              key={color}
-              type="button"
-              onClick={() => setFormColor(color)}
-              className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
-                formColor === color ? 'ring-2 ring-offset-2 ring-foreground' : ''
-              }`}
-              style={{ backgroundColor: color }}
-            />
-          ))}
-        </div>
-      </div>
-      
-      <Button type="submit" className="w-full btn-primary" data-testid="project-submit-btn">
-        {submitLabel}
-      </Button>
-    </form>
-  );
+  const handleCreateOpenChange = (open) => {
+    setIsCreateOpen(open);
+    if (!open) resetForm();
+  };
+
+  const handleEditOpenChange = (open) => {
+    setIsEditOpen(open);
+    if (!open) {
+      setEditingProject(null);
+      resetForm();
+    }
+  };
 
   if (loading) {
     return (
@@ -209,7 +179,7 @@ export const ProjectsPage = () => {
           </p>
         </div>
         
-        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+        <Dialog open={isCreateOpen} onOpenChange={handleCreateOpenChange}>
           <DialogTrigger asChild>
             <Button className="btn-primary" data-testid="create-project-btn">
               <Plus className="w-4 h-4 mr-2" />
@@ -223,7 +193,58 @@ export const ProjectsPage = () => {
                 Crea un nuevo proyecto para organizar tus pomodoros
               </DialogDescription>
             </DialogHeader>
-            <ProjectForm onSubmit={handleCreate} submitLabel="Crear Proyecto" />
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="create-project-name">Nombre del proyecto</Label>
+                <Input
+                  id="create-project-name"
+                  data-testid="project-name-input"
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="Mi proyecto"
+                  autoFocus
+                  required
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="create-project-description">Descripción (opcional)</Label>
+                <Textarea
+                  id="create-project-description"
+                  data-testid="project-description-input"
+                  value={formDescription}
+                  onChange={(e) => setFormDescription(e.target.value)}
+                  placeholder="Describe tu proyecto..."
+                  rows={3}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Color</Label>
+                <div className="flex flex-wrap gap-2">
+                  {PROJECT_COLORS.map(color => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => setFormColor(color)}
+                      className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
+                        formColor === color ? 'ring-2 ring-offset-2 ring-foreground' : ''
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+              
+              <Button 
+                type="submit" 
+                className="w-full btn-primary" 
+                data-testid="project-submit-btn"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Creando...' : 'Crear Proyecto'}
+              </Button>
+            </form>
           </DialogContent>
         </Dialog>
       </div>
@@ -308,7 +329,7 @@ export const ProjectsPage = () => {
       )}
 
       {/* Edit Dialog */}
-      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+      <Dialog open={isEditOpen} onOpenChange={handleEditOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Editar Proyecto</DialogTitle>
@@ -316,7 +337,55 @@ export const ProjectsPage = () => {
               Actualiza la información de tu proyecto
             </DialogDescription>
           </DialogHeader>
-          <ProjectForm onSubmit={handleEdit} submitLabel="Guardar Cambios" />
+          <form onSubmit={handleEdit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-project-name">Nombre del proyecto</Label>
+              <Input
+                id="edit-project-name"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="Mi proyecto"
+                autoFocus
+                required
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-project-description">Descripción (opcional)</Label>
+              <Textarea
+                id="edit-project-description"
+                value={formDescription}
+                onChange={(e) => setFormDescription(e.target.value)}
+                placeholder="Describe tu proyecto..."
+                rows={3}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Color</Label>
+              <div className="flex flex-wrap gap-2">
+                {PROJECT_COLORS.map(color => (
+                  <button
+                    key={color}
+                    type="button"
+                    onClick={() => setFormColor(color)}
+                    className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
+                      formColor === color ? 'ring-2 ring-offset-2 ring-foreground' : ''
+                    }`}
+                    style={{ backgroundColor: color }}
+                  />
+                ))}
+              </div>
+            </div>
+            
+            <Button 
+              type="submit" 
+              className="w-full btn-primary"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Guardando...' : 'Guardar Cambios'}
+            </Button>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
