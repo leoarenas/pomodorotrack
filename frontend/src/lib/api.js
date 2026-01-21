@@ -20,15 +20,19 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle auth errors
+// Handle auth errors - but don't auto-redirect
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Only clear local storage on 401, but don't force redirect
+    // Let the AuthContext handle redirects gracefully
     if (error.response?.status === 401) {
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('user');
-      localStorage.removeItem('company');
-      window.location.href = '/login';
+      // Check if this is NOT a login/register request
+      const url = error.config?.url || '';
+      if (!url.includes('/auth/login') && !url.includes('/auth/register')) {
+        // Don't redirect automatically - let components handle it
+        console.warn('Auth error 401 - token may be invalid');
+      }
     }
     return Promise.reject(error);
   }
