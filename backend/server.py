@@ -314,6 +314,153 @@ async def get_current_company(current_user: dict = Depends(get_current_user)):
     
     return CompanyResponse(**company)
 
+# ============== USER MANAGEMENT ROUTES ==============
+# Only Owner/Admin can manage users
+
+def require_admin_or_owner(current_user: dict):
+    """Check if user is admin or owner"""
+    role = current_user.get("role", "user")
+    if role not in ["owner", "admin"]:
+        raise HTTPException(status_code=403, detail="No tienes permisos para esta acción")
+    return current_user
+
+@api_router.get("/users", response_model=List[CompanyUserResponse])
+async def get_company_users(current_user: dict = Depends(get_current_user)):
+    """Get all users from current company - Owner/Admin only"""
+    require_admin_or_owner(current_user)
+    
+    if not current_user.get("companyId"):
+        raise HTTPException(status_code=400, detail="No perteneces a ninguna empresa")
+    
+    users = await db.users.find(
+        {"companyId": current_user["companyId"]},
+        {"_id": 0, "password": 0, "token": 0, "firebaseUid": 0}
+    ).to_list(100)
+    
+    return [CompanyUserResponse(**u) for u in users]
+
+@api_router.post("/users", response_model=CompanyUserResponse)
+async def create_company_user(data: UserCreate, current_user: dict = Depends(get_current_user)):
+    """Create a new user in the company - Owner/Admin only"""
+    require_admin_or_owner(current_user)
+    
+    if not current_user.get("companyId"):
+        raise HTTPException(status_code=400, detail="No perteneces a ninguna empresa")
+    
+    # Check if email already exists
+    existing = await db.users.find_one({"email": data.email})
+    if existing:
+        raise HTTPException(status_code=400, detail="El correo ya está registrado")
+    
+    # Validate role
+    if data.role not in ["admin", "user"]:
+        raise HTTPException(status_code=400, detail="Rol inválido. Debe ser 'admin' o 'user'")
+    
+    uid = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    user_doc = {
+        "uid": uid,
+        "email": data.email,
+        "password": hashlib.sha256(data.password.encode()).hexdigest(),
+        "displayName": data.displayName,
+        "companyId": current_user["companyId"],  # Auto-assign companyId
+        "role": data.role,
+        "token": None,
+        "createdAt": now
+    }
+    await db.users.insert_one(user_doc)
+    
+    return CompanyUserResponse(
+        uid=uid,
+        email=data.email,
+        displayName=data.displayName,
+        companyId=current_user["companyId"],
+        role=data.role,
+        createdAt=now
+    )
+
+@api_router.get("/users/{user_id}", response_model=CompanyUserResponse)
+async def get_company_user(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Get a specific user from current company - Owner/Admin only"""
+    require_admin_or_owner(current_user)
+    
+    user = await db.users.find_one(
+        {"uid": user_id, "companyId": current_user.get("companyId")},
+        {"_id": 0, "password": 0, "token": 0, "firebaseUid": 0}
+    )
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    return CompanyUserResponse(**user)
+
+@api_router.put("/users/{user_id}", response_model=CompanyUserResponse)
+async def update_company_user(user_id: str, data: UserUpdate, current_user: dict = Depends(get_current_user)):
+    """Update a user in the company - Owner/Admin only"""
+    require_admin_or_owner(current_user)
+    
+    # Find user in same company
+    user = await db.users.find_one({
+        "uid": user_id,
+        "companyId": current_user.get("companyId")
+    })
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Prevent changing owner role
+    if user.get("role") == "owner" and data.role and data.role != "owner":
+        raise HTTPException(status_code=400, detail="No se puede cambiar el rol del propietario")
+    
+    # Prevent non-owner from creating admins
+    if data.role == "admin" and current_user.get("role") != "owner":
+        raise HTTPException(status_code=403, detail="Solo el propietario puede crear administradores")
+    
+    # Validate role if provided
+    if data.role and data.role not in ["admin", "user"]:
+        raise HTTPException(status_code=400, detail="Rol inválido. Debe ser 'admin' o 'user'")
+    
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if update_data:
+        await db.users.update_one({"uid": user_id}, {"$set": update_data})
+    
+    updated = await db.users.find_one(
+        {"uid": user_id},
+        {"_id": 0, "password": 0, "token": 0, "firebaseUid": 0}
+    )
+    return CompanyUserResponse(**updated)
+
+@api_router.delete("/users/{user_id}")
+async def delete_company_user(user_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a user from the company - Owner/Admin only"""
+    require_admin_or_owner(current_user)
+    
+    # Find user in same company
+    user = await db.users.find_one({
+        "uid": user_id,
+        "companyId": current_user.get("companyId")
+    })
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Prevent deleting owner
+    if user.get("role") == "owner":
+        raise HTTPException(status_code=400, detail="No se puede eliminar al propietario")
+    
+    # Prevent deleting yourself
+    if user_id == current_user["uid"]:
+        raise HTTPException(status_code=400, detail="No puedes eliminarte a ti mismo")
+    
+    # Only owner can delete admins
+    if user.get("role") == "admin" and current_user.get("role") != "owner":
+        raise HTTPException(status_code=403, detail="Solo el propietario puede eliminar administradores")
+    
+    await db.users.delete_one({"uid": user_id})
+    
+    return {"message": "Usuario eliminado"}
+
 # ============== PROJECT ROUTES ==============
 # Collection: projects
 # Fields: projectId, companyId, name, createdAt
