@@ -35,7 +35,19 @@ export const AuthPage = () => {
       toast.success('¡Bienvenido de nuevo!');
       navigate('/dashboard');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Error al iniciar sesión');
+      console.error('Login error:', error);
+      const firebaseError = error.code;
+      let errorMessage = error.response?.data?.detail || error.message || 'Error al iniciar sesión';
+      
+      if (firebaseError === 'auth/user-not-found' || firebaseError === 'auth/wrong-password') {
+        errorMessage = 'Credenciales inválidas';
+      } else if (firebaseError === 'auth/invalid-email') {
+        errorMessage = 'El correo electrónico no es válido';
+      } else if (firebaseError === 'auth/too-many-requests') {
+        errorMessage = 'Demasiados intentos. Intenta más tarde.';
+      }
+      
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
