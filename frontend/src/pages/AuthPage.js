@@ -50,7 +50,20 @@ export const AuthPage = () => {
       toast.success('¡Cuenta creada exitosamente!');
       navigate('/dashboard');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Error al crear cuenta');
+      console.error('Registration error:', error);
+      // Handle Firebase specific errors
+      const firebaseError = error.code;
+      let errorMessage = error.response?.data?.detail || error.message || 'Error al crear cuenta';
+      
+      if (firebaseError === 'auth/email-already-in-use') {
+        errorMessage = 'Este correo ya está registrado';
+      } else if (firebaseError === 'auth/weak-password') {
+        errorMessage = 'La contraseña debe tener al menos 6 caracteres';
+      } else if (firebaseError === 'auth/invalid-email') {
+        errorMessage = 'El correo electrónico no es válido';
+      }
+      
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
