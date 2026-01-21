@@ -83,4 +83,14 @@ export const statsApi = {
   getByProject: () => api.get('/stats/by-project'),
 };
 
+// Users API (Company User Management)
+// Only Owner/Admin can access these endpoints
+export const usersApi = {
+  getAll: () => api.get('/users'),
+  getById: (id) => api.get(`/users/${id}`),
+  create: (data) => api.post('/users', data),
+  update: (id, data) => api.put(`/users/${id}`, data),
+  delete: (id) => api.delete(`/users/${id}`),
+};
+
 export default api;
