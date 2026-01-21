@@ -111,6 +111,11 @@
   }
 }
 
+/* Ensure Select dropdown has highest z-index */
+[data-radix-popper-content-wrapper] {
+  z-index: 9999 !important;
+}
+
 /* Animations */
 @keyframes pulse-ring {
   0% {
