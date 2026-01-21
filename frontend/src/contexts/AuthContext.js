@@ -1,12 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { authApi, companyApi } from '../lib/api';
-import { 
-  registerWithEmail, 
-  loginWithEmail, 
-  logoutUser, 
-  subscribeToAuthChanges,
-  getCurrentToken 
-} from '../lib/firebase';
 
 const AuthContext = createContext(null);
 
@@ -18,54 +11,73 @@ export const useAuth = () => {
   return context;
 };
 
+// Check if Firebase is properly configured
+const isFirebaseConfigured = () => {
+  return process.env.REACT_APP_FIREBASE_API_KEY && 
+         process.env.REACT_APP_FIREBASE_AUTH_DOMAIN &&
+         process.env.REACT_APP_FIREBASE_PROJECT_ID;
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [company, setCompany] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [firebaseUser, setFirebaseUser] = useState(null);
 
-  // Subscribe to Firebase auth changes
   useEffect(() => {
-    const unsubscribe = subscribeToAuthChanges(async (fbUser) => {
-      setFirebaseUser(fbUser);
-      
-      if (fbUser) {
-        // Get fresh token and sync with backend
-        try {
-          const token = await fbUser.getIdToken();
-          localStorage.setItem('authToken', token);
-          
-          // Fetch user data from backend
-          const response = await authApi.getMe();
-          setUser(response.data.user);
-          setCompany(response.data.company);
-        } catch (error) {
-          console.error('Error syncing user:', error);
-          // If backend doesn't have this user yet, they need to complete registration
-          if (error.response?.status === 401) {
-            localStorage.removeItem('authToken');
-          }
-        }
-      } else {
-        setUser(null);
-        setCompany(null);
-        localStorage.removeItem('authToken');
-      }
-      
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    checkAuth();
   }, []);
 
+  const checkAuth = async () => {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const response = await authApi.getMe();
+      setUser(response.data.user);
+      setCompany(response.data.company);
+    } catch (error) {
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('user');
+      localStorage.removeItem('company');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const login = async (email, password) => {
-    // Login with Firebase
-    const { token } = await loginWithEmail(email, password);
-    localStorage.setItem('authToken', token);
+    // Try Firebase first if configured
+    if (isFirebaseConfigured()) {
+      try {
+        const { loginWithEmail } = await import('../lib/firebase');
+        const { token } = await loginWithEmail(email, password);
+        localStorage.setItem('authToken', token);
+        
+        // Sync with backend
+        const response = await authApi.login({ email, password });
+        const { user: userData, company: companyData } = response.data;
+        
+        setUser(userData);
+        setCompany(companyData);
+        
+        return response.data;
+      } catch (firebaseError) {
+        console.warn('Firebase login failed, trying backend auth:', firebaseError);
+        // Fall through to backend auth
+      }
+    }
     
-    // Sync with backend
+    // Backend-only authentication
     const response = await authApi.login({ email, password });
-    const { user: userData, company: companyData } = response.data;
+    const { token, user: userData, company: companyData } = response.data;
+    
+    localStorage.setItem('authToken', token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    if (companyData) {
+      localStorage.setItem('company', JSON.stringify(companyData));
+    }
     
     setUser(userData);
     setCompany(companyData);
@@ -74,20 +86,36 @@ export const AuthProvider = ({ children }) => {
   };
 
   const register = async (email, password, displayName, companyName) => {
-    // Register with Firebase
-    const { user: fbUser, token } = await registerWithEmail(email, password, displayName);
-    localStorage.setItem('authToken', token);
+    let firebaseUid = null;
     
-    // Register in backend (creates company if provided)
+    // Try Firebase first if configured
+    if (isFirebaseConfigured()) {
+      try {
+        const { registerWithEmail } = await import('../lib/firebase');
+        const { user: fbUser, token } = await registerWithEmail(email, password, displayName);
+        firebaseUid = fbUser.uid;
+        localStorage.setItem('authToken', token);
+      } catch (firebaseError) {
+        console.warn('Firebase registration failed, using backend only:', firebaseError);
+        // Continue without Firebase
+      }
+    }
+    
+    // Register in backend
     const response = await authApi.register({
       email,
       password,
       displayName,
       companyName: companyName || null,
-      firebaseUid: fbUser.uid
+      firebaseUid
     });
+    const { token, user: userData, company: companyData } = response.data;
     
-    const { user: userData, company: companyData } = response.data;
+    localStorage.setItem('authToken', token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    if (companyData) {
+      localStorage.setItem('company', JSON.stringify(companyData));
+    }
     
     setUser(userData);
     setCompany(companyData);
@@ -102,8 +130,15 @@ export const AuthProvider = ({ children }) => {
       // Ignore errors
     }
     
-    // Logout from Firebase
-    await logoutUser();
+    // Try Firebase logout if configured
+    if (isFirebaseConfigured()) {
+      try {
+        const { logoutUser } = await import('../lib/firebase');
+        await logoutUser();
+      } catch (e) {
+        // Ignore
+      }
+    }
     
     localStorage.removeItem('authToken');
     localStorage.removeItem('user');
@@ -118,44 +153,22 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('company', JSON.stringify(response.data));
     
     // Refresh user data
-    const userResponse = await authApi.getMe();
-    setUser(userResponse.data.user);
+    await checkAuth();
     
     return response.data;
   };
-
-  // Refresh token periodically
-  useEffect(() => {
-    const refreshToken = async () => {
-      if (firebaseUser) {
-        try {
-          const token = await getCurrentToken();
-          if (token) {
-            localStorage.setItem('authToken', token);
-          }
-        } catch (error) {
-          console.error('Error refreshing token:', error);
-        }
-      }
-    };
-
-    // Refresh token every 50 minutes (Firebase tokens expire in 1 hour)
-    const interval = setInterval(refreshToken, 50 * 60 * 1000);
-    
-    return () => clearInterval(interval);
-  }, [firebaseUser]);
 
   const value = {
     user,
     company,
     loading,
-    firebaseUser,
     isAuthenticated: !!user,
     hasCompany: !!company,
     login,
     register,
     logout,
     createCompany,
+    refreshAuth: checkAuth,
   };
 
   return (
