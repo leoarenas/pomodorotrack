@@ -6,6 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Progress } from '../components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Badge } from '../components/ui/badge';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
 import { 
   Play, 
   Pause, 
@@ -15,7 +24,9 @@ import {
   Clock, 
   Flame,
   TrendingUp,
-  CheckCircle2
+  CheckCircle2,
+  Bell,
+  BellOff
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -34,6 +45,16 @@ const DURATIONS = {
   long_break: 15 * 60
 };
 
+// LocalStorage keys
+const STORAGE_KEYS = {
+  TIMER_STATE: 'pomodorotrack_timer_state',
+  TIME_LEFT: 'pomodorotrack_time_left',
+  PROJECT_ID: 'pomodorotrack_project_id',
+  ACTIVITY: 'pomodorotrack_activity',
+  START_TIME: 'pomodorotrack_start_time',
+  IS_RUNNING: 'pomodorotrack_is_running'
+};
+
 export const DashboardPage = () => {
   const { user, company } = useAuth();
   const [projects, setProjects] = useState([]);
@@ -45,15 +66,84 @@ export const DashboardPage = () => {
   const [todayStats, setTodayStats] = useState(null);
   const [weekStats, setWeekStats] = useState(null);
   const [projectStats, setProjectStats] = useState([]);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  
+  // Activity modal state
+  const [showActivityModal, setShowActivityModal] = useState(false);
+  const [activityDescription, setActivityDescription] = useState('');
+  
   const intervalRef = useRef(null);
   const audioRef = useRef(null);
 
-  // Load initial data
-  useEffect(() => {
-    loadProjects();
-    loadStats();
+  // Request notification permission
+  const requestNotificationPermission = async () => {
+    if (!('Notification' in window)) {
+      toast.error('Tu navegador no soporta notificaciones');
+      return;
+    }
     
-    // Create audio element for notifications
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      setNotificationsEnabled(true);
+      toast.success('Notificaciones activadas');
+    } else {
+      toast.error('Permiso de notificaciones denegado');
+    }
+  };
+
+  // Send notification
+  const sendNotification = (title, body) => {
+    if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, {
+        body,
+        icon: '/favicon.ico',
+        tag: 'pomodorotrack-timer'
+      });
+    }
+  };
+
+  // Load persisted timer state
+  useEffect(() => {
+    const savedTimerState = localStorage.getItem(STORAGE_KEYS.TIMER_STATE);
+    const savedTimeLeft = localStorage.getItem(STORAGE_KEYS.TIME_LEFT);
+    const savedProjectId = localStorage.getItem(STORAGE_KEYS.PROJECT_ID);
+    const savedActivity = localStorage.getItem(STORAGE_KEYS.ACTIVITY);
+    const savedIsRunning = localStorage.getItem(STORAGE_KEYS.IS_RUNNING);
+    const savedStartTime = localStorage.getItem(STORAGE_KEYS.START_TIME);
+    
+    if (savedTimerState && savedTimerState !== TIMER_STATES.IDLE) {
+      setTimerState(savedTimerState);
+      setActivityDescription(savedActivity || '');
+      
+      if (savedIsRunning === 'true' && savedStartTime) {
+        // Calculate elapsed time since page was closed
+        const elapsed = Math.floor((Date.now() - parseInt(savedStartTime)) / 1000);
+        const remaining = parseInt(savedTimeLeft) - elapsed;
+        
+        if (remaining > 0) {
+          setTimeLeft(remaining);
+          setIsRunning(true);
+        } else {
+          // Timer would have completed
+          setTimeLeft(0);
+          setTimerState(TIMER_STATES.IDLE);
+          clearPersistedTimer();
+        }
+      } else {
+        setTimeLeft(parseInt(savedTimeLeft) || DURATIONS.work);
+      }
+    }
+    
+    if (savedProjectId) {
+      setSelectedProject(savedProjectId);
+    }
+    
+    // Check notification permission
+    if ('Notification' in window && Notification.permission === 'granted') {
+      setNotificationsEnabled(true);
+    }
+    
+    // Create audio element
     audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     
     return () => {
@@ -61,12 +151,49 @@ export const DashboardPage = () => {
     };
   }, []);
 
+  // Persist timer state
+  const persistTimerState = useCallback(() => {
+    localStorage.setItem(STORAGE_KEYS.TIMER_STATE, timerState);
+    localStorage.setItem(STORAGE_KEYS.TIME_LEFT, timeLeft.toString());
+    localStorage.setItem(STORAGE_KEYS.PROJECT_ID, selectedProject || '');
+    localStorage.setItem(STORAGE_KEYS.ACTIVITY, activityDescription);
+    localStorage.setItem(STORAGE_KEYS.IS_RUNNING, isRunning.toString());
+    if (isRunning) {
+      localStorage.setItem(STORAGE_KEYS.START_TIME, Date.now().toString());
+    }
+  }, [timerState, timeLeft, selectedProject, activityDescription, isRunning]);
+
+  // Clear persisted timer
+  const clearPersistedTimer = () => {
+    Object.values(STORAGE_KEYS).forEach(key => localStorage.removeItem(key));
+  };
+
+  // Persist on state changes
+  useEffect(() => {
+    if (timerState !== TIMER_STATES.IDLE) {
+      persistTimerState();
+    }
+  }, [timerState, timeLeft, isRunning, persistTimerState]);
+
+  // Load initial data
+  useEffect(() => {
+    loadProjects();
+    loadStats();
+  }, []);
+
   const loadProjects = async () => {
     try {
       const response = await projectsApi.getAll();
       setProjects(response.data);
-      if (response.data.length > 0 && !selectedProject) {
-        setSelectedProject(response.data[0].projectId);
+      
+      // Auto-select first project if none selected
+      const savedProjectId = localStorage.getItem(STORAGE_KEYS.PROJECT_ID);
+      if (response.data.length > 0) {
+        if (savedProjectId && response.data.find(p => p.projectId === savedProjectId)) {
+          setSelectedProject(savedProjectId);
+        } else if (!selectedProject) {
+          setSelectedProject(response.data[0].projectId);
+        }
       }
     } catch (error) {
       console.error('Error loading projects:', error);
@@ -89,20 +216,44 @@ export const DashboardPage = () => {
     }
   };
 
-  // Timer logic
-  const startTimer = useCallback(() => {
+  // Open activity modal before starting timer
+  const handleStartClick = () => {
     if (!selectedProject && projects.length > 0) {
       toast.error('Selecciona un proyecto primero');
       return;
     }
     
-    if (timerState === TIMER_STATES.IDLE) {
-      setTimerState(TIMER_STATES.WORK);
-      setTimeLeft(DURATIONS.work);
+    if (projects.length === 0) {
+      toast.error('Crea un proyecto primero en la sección Proyectos');
+      return;
     }
     
+    // If timer was paused, just resume
+    if (timerState === TIMER_STATES.WORK && !isRunning) {
+      setIsRunning(true);
+      return;
+    }
+    
+    // Show activity modal for new session
+    setShowActivityModal(true);
+  };
+
+  // Start timer after activity is set
+  const startTimerWithActivity = () => {
+    if (!activityDescription.trim()) {
+      toast.error('Por favor, describe la actividad');
+      return;
+    }
+    
+    setShowActivityModal(false);
+    setTimerState(TIMER_STATES.WORK);
+    setTimeLeft(DURATIONS.work);
     setIsRunning(true);
-  }, [selectedProject, projects, timerState]);
+    
+    toast.success(`Iniciando: ${activityDescription}`, {
+      description: '25 minutos de enfoque'
+    });
+  };
 
   const pauseTimer = useCallback(() => {
     setIsRunning(false);
@@ -112,6 +263,8 @@ export const DashboardPage = () => {
     setIsRunning(false);
     setTimerState(TIMER_STATES.IDLE);
     setTimeLeft(DURATIONS.work);
+    setActivityDescription('');
+    clearPersistedTimer();
   }, []);
 
   const startBreak = useCallback((isLong = false) => {
@@ -151,7 +304,7 @@ export const DashboardPage = () => {
             projectId: selectedProject,
             duration: DURATIONS.work,
             type: 'pomodoro',
-            notes: ''
+            notes: activityDescription
           });
           setPomodorosToday(prev => prev + 1);
           loadStats();
@@ -160,8 +313,11 @@ export const DashboardPage = () => {
         }
       }
       
+      // Send notification
+      sendNotification('¡Pomodoro completado! 🍅', `"${activityDescription}" - Toma un descanso de 5 minutos`);
+      
       toast.success('¡Pomodoro completado! 🍅', {
-        description: 'Toma un descanso de 5 minutos',
+        description: `"${activityDescription}" - Toma un descanso`,
         action: {
           label: 'Iniciar descanso',
           onClick: () => startBreak(false)
@@ -170,6 +326,8 @@ export const DashboardPage = () => {
       
       setTimerState(TIMER_STATES.IDLE);
       setTimeLeft(DURATIONS.work);
+      setActivityDescription('');
+      clearPersistedTimer();
     } else {
       // Break completed - save break time
       if (selectedProject) {
@@ -178,12 +336,15 @@ export const DashboardPage = () => {
             projectId: selectedProject,
             duration: timerState === TIMER_STATES.LONG_BREAK ? DURATIONS.long_break : DURATIONS.break,
             type: 'break',
-            notes: ''
+            notes: 'Descanso'
           });
         } catch (error) {
           console.error('Error saving break:', error);
         }
       }
+      
+      // Send notification
+      sendNotification('¡Descanso terminado!', '¿Listo para otro pomodoro?');
       
       toast.success('¡Descanso terminado!', {
         description: '¿Listo para otro pomodoro?'
@@ -191,6 +352,7 @@ export const DashboardPage = () => {
       
       setTimerState(TIMER_STATES.IDLE);
       setTimeLeft(DURATIONS.work);
+      clearPersistedTimer();
     }
   };
 
@@ -235,6 +397,19 @@ export const DashboardPage = () => {
         </div>
         
         <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={requestNotificationPermission}
+            title={notificationsEnabled ? 'Notificaciones activadas' : 'Activar notificaciones'}
+            data-testid="notifications-btn"
+          >
+            {notificationsEnabled ? (
+              <Bell className="w-5 h-5 text-primary" />
+            ) : (
+              <BellOff className="w-5 h-5 text-muted-foreground" />
+            )}
+          </Button>
           <Badge variant="secondary" className="px-4 py-2">
             <Flame className="w-4 h-4 mr-2 text-primary" />
             {pomodorosToday} pomodoros hoy
@@ -248,7 +423,7 @@ export const DashboardPage = () => {
         <Card className="col-span-full md:col-span-2 lg:col-span-2 row-span-2 card-hover" data-testid="timer-card">
           <CardContent className="p-8 flex flex-col items-center justify-center min-h-[400px]">
             {/* Project Selector */}
-            <div className="w-full max-w-xs mb-8">
+            <div className="w-full max-w-xs mb-4">
               <Select value={selectedProject || ''} onValueChange={setSelectedProject}>
                 <SelectTrigger data-testid="project-selector" className="w-full">
                   <SelectValue placeholder="Selecciona un proyecto" />
@@ -268,6 +443,14 @@ export const DashboardPage = () => {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Current Activity Display */}
+            {activityDescription && timerState !== TIMER_STATES.IDLE && (
+              <div className="mb-4 px-4 py-2 bg-muted rounded-lg max-w-xs text-center">
+                <p className="text-sm text-muted-foreground">Actividad actual:</p>
+                <p className="font-medium truncate">{activityDescription}</p>
+              </div>
+            )}
 
             {/* Timer Display */}
             <div className="relative mb-8">
@@ -289,9 +472,6 @@ export const DashboardPage = () => {
               <Progress 
                 value={getProgress()} 
                 className="h-2"
-                style={{ 
-                  '--progress-color': timerState === TIMER_STATES.WORK ? 'hsl(var(--primary))' : 'hsl(var(--success))'
-                }}
               />
               <p className="text-center text-sm text-muted-foreground mt-2">
                 {timerState === TIMER_STATES.IDLE && 'Listo para comenzar'}
@@ -307,7 +487,7 @@ export const DashboardPage = () => {
                 <Button 
                   size="lg" 
                   className="btn-primary rounded-full w-16 h-16"
-                  onClick={startTimer}
+                  onClick={handleStartClick}
                   data-testid="start-timer-btn"
                 >
                   <Play className="w-6 h-6 ml-1" />
@@ -472,7 +652,7 @@ export const DashboardPage = () => {
           </CardContent>
         </Card>
 
-        {/* Weekly Chart Placeholder */}
+        {/* Weekly Chart */}
         <Card className="col-span-full md:col-span-2 card-hover" data-testid="weekly-chart-card">
           <CardHeader>
             <CardTitle>Actividad Semanal</CardTitle>
@@ -500,6 +680,53 @@ export const DashboardPage = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Activity Modal */}
+      <Dialog open={showActivityModal} onOpenChange={setShowActivityModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿En qué vas a trabajar?</DialogTitle>
+            <DialogDescription>
+              Describe brevemente la actividad para este pomodoro
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="activity-description">Actividad</Label>
+              <Input
+                id="activity-description"
+                data-testid="activity-input"
+                value={activityDescription}
+                onChange={(e) => setActivityDescription(e.target.value)}
+                placeholder="Ej: Revisar documentación del proyecto"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && activityDescription.trim()) {
+                    startTimerWithActivity();
+                  }
+                }}
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setShowActivityModal(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1 btn-primary"
+                onClick={startTimerWithActivity}
+                data-testid="confirm-activity-btn"
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Iniciar Pomodoro
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
