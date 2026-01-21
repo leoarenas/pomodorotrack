@@ -84,7 +84,13 @@ export const ProjectsPage = () => {
       resetForm();
       loadProjects();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Error al crear proyecto');
+      const errorMsg = error.response?.data?.detail || 'Error al crear proyecto';
+      toast.error(errorMsg);
+      // Close modal on error to prevent UI blocking
+      if (error.response?.status === 400) {
+        setIsCreateOpen(false);
+        resetForm();
+      }
     }
   };
 
