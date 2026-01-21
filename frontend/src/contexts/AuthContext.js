@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authApi, companyApi } from '../lib/api';
 
 const AuthContext = createContext(null);
@@ -11,65 +11,69 @@ export const useAuth = () => {
   return context;
 };
 
-// Check if Firebase is properly configured
-const isFirebaseConfigured = () => {
-  return process.env.REACT_APP_FIREBASE_API_KEY && 
-         process.env.REACT_APP_FIREBASE_AUTH_DOMAIN &&
-         process.env.REACT_APP_FIREBASE_PROJECT_ID;
-};
-
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [company, setCompany] = useState(null);
+  const [user, setUser] = useState(() => {
+    // Initialize from localStorage to prevent flash
+    const savedUser = localStorage.getItem('user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+  
+  const [company, setCompany] = useState(() => {
+    const savedCompany = localStorage.getItem('company');
+    return savedCompany ? JSON.parse(savedCompany) : null;
+  });
+  
   const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
+  const checkAuth = useCallback(async () => {
     const token = localStorage.getItem('authToken');
     if (!token) {
+      setUser(null);
+      setCompany(null);
       setLoading(false);
+      setAuthChecked(true);
       return;
     }
 
     try {
       const response = await authApi.getMe();
-      setUser(response.data.user);
-      setCompany(response.data.company);
+      const userData = response.data.user;
+      const companyData = response.data.company;
+      
+      setUser(userData);
+      setCompany(companyData);
+      
+      // Update localStorage
+      localStorage.setItem('user', JSON.stringify(userData));
+      if (companyData) {
+        localStorage.setItem('company', JSON.stringify(companyData));
+      }
     } catch (error) {
-      localStorage.removeItem('authToken');
-      localStorage.removeItem('user');
-      localStorage.removeItem('company');
+      console.error('Auth check failed:', error);
+      // Only clear if it's a real auth error, not a network error
+      if (error.response?.status === 401) {
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('user');
+        localStorage.removeItem('company');
+        setUser(null);
+        setCompany(null);
+      }
+      // If network error, keep existing state from localStorage
     } finally {
       setLoading(false);
+      setAuthChecked(true);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!authChecked) {
+      checkAuth();
+    }
+  }, [authChecked, checkAuth]);
 
   const login = async (email, password) => {
-    // Try Firebase first if configured
-    if (isFirebaseConfigured()) {
-      try {
-        const { loginWithEmail } = await import('../lib/firebase');
-        const { token } = await loginWithEmail(email, password);
-        localStorage.setItem('authToken', token);
-        
-        // Sync with backend
-        const response = await authApi.login({ email, password });
-        const { user: userData, company: companyData } = response.data;
-        
-        setUser(userData);
-        setCompany(companyData);
-        
-        return response.data;
-      } catch (firebaseError) {
-        console.warn('Firebase login failed, trying backend auth:', firebaseError);
-        // Fall through to backend auth
-      }
-    }
-    
-    // Backend-only authentication
+    // Use backend authentication
     const response = await authApi.login({ email, password });
     const { token, user: userData, company: companyData } = response.data;
     
@@ -86,28 +90,12 @@ export const AuthProvider = ({ children }) => {
   };
 
   const register = async (email, password, displayName, companyName) => {
-    let firebaseUid = null;
-    
-    // Try Firebase first if configured
-    if (isFirebaseConfigured()) {
-      try {
-        const { registerWithEmail } = await import('../lib/firebase');
-        const { user: fbUser, token } = await registerWithEmail(email, password, displayName);
-        firebaseUid = fbUser.uid;
-        localStorage.setItem('authToken', token);
-      } catch (firebaseError) {
-        console.warn('Firebase registration failed, using backend only:', firebaseError);
-        // Continue without Firebase
-      }
-    }
-    
     // Register in backend
     const response = await authApi.register({
       email,
       password,
       displayName,
       companyName: companyName || null,
-      firebaseUid
     });
     const { token, user: userData, company: companyData } = response.data;
     
@@ -130,16 +118,6 @@ export const AuthProvider = ({ children }) => {
       // Ignore errors
     }
     
-    // Try Firebase logout if configured
-    if (isFirebaseConfigured()) {
-      try {
-        const { logoutUser } = await import('../lib/firebase');
-        await logoutUser();
-      } catch (e) {
-        // Ignore
-      }
-    }
-    
     localStorage.removeItem('authToken');
     localStorage.removeItem('user');
     localStorage.removeItem('company');
@@ -149,13 +127,17 @@ export const AuthProvider = ({ children }) => {
 
   const createCompany = async (name) => {
     const response = await companyApi.create({ name });
-    setCompany(response.data);
-    localStorage.setItem('company', JSON.stringify(response.data));
+    const companyData = response.data;
     
-    // Refresh user data
-    await checkAuth();
+    setCompany(companyData);
+    localStorage.setItem('company', JSON.stringify(companyData));
     
-    return response.data;
+    // Refresh user data to get updated role
+    const userResponse = await authApi.getMe();
+    setUser(userResponse.data.user);
+    localStorage.setItem('user', JSON.stringify(userResponse.data.user));
+    
+    return companyData;
   };
 
   const value = {
