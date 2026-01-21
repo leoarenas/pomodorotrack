@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTimerSettings } from '../hooks/useTimerSettings';
-import { projectsApi, timeEntriesApi, statsApi } from '../lib/api';
+import { projectsApi, timeRecordsApi, statsApi } from '../lib/api';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Progress } from '../components/ui/progress';
