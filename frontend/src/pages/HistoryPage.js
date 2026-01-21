@@ -1,15 +1,13 @@
 import { useState, useEffect } from 'react';
-import { timeEntriesApi, projectsApi, statsApi } from '../lib/api';
+import { timeRecordsApi, projectsApi } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Calendar } from '../components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { 
   CalendarDays, 
   Clock, 
-  Coffee, 
   Target,
   Filter,
   ChevronLeft,
@@ -19,12 +17,12 @@ import { format, startOfWeek, endOfWeek, addWeeks, subWeeks, isToday } from 'dat
 import { es } from 'date-fns/locale';
 
 export const HistoryPage = () => {
-  const [entries, setEntries] = useState([]);
+  const [records, setRecords] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedProject, setSelectedProject] = useState('all');
-  const [viewMode, setViewMode] = useState('day'); // day, week
+  const [viewMode, setViewMode] = useState('day');
   const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { locale: es }));
 
   useEffect(() => {
@@ -32,7 +30,7 @@ export const HistoryPage = () => {
   }, []);
 
   useEffect(() => {
-    loadEntries();
+    loadRecords();
   }, [selectedDate, selectedProject, viewMode, weekStart]);
 
   const loadProjects = async () => {
@@ -44,42 +42,44 @@ export const HistoryPage = () => {
     }
   };
 
-  const loadEntries = async () => {
+  const loadRecords = async () => {
     setLoading(true);
     try {
       const params = {};
-      
-      if (viewMode === 'day') {
-        params.date = format(selectedDate, 'yyyy-MM-dd');
-      }
       
       if (selectedProject !== 'all') {
         params.projectId = selectedProject;
       }
       
-      const response = await timeEntriesApi.getAll(params);
+      const response = await timeRecordsApi.getAll(params);
       
-      // Filter by week if needed
-      let filteredEntries = response.data;
-      if (viewMode === 'week') {
+      // Filter by date range
+      let filteredRecords = response.data;
+      
+      if (viewMode === 'day') {
+        const dateStr = format(selectedDate, 'yyyy-MM-dd');
+        filteredRecords = response.data.filter(record => 
+          record.createdAt.startsWith(dateStr)
+        );
+      } else if (viewMode === 'week') {
         const weekEnd = endOfWeek(weekStart, { locale: es });
-        filteredEntries = response.data.filter(entry => {
-          const entryDate = new Date(entry.date);
-          return entryDate >= weekStart && entryDate <= weekEnd;
+        filteredRecords = response.data.filter(record => {
+          const recordDate = new Date(record.createdAt);
+          return recordDate >= weekStart && recordDate <= weekEnd;
         });
       }
       
-      setEntries(filteredEntries);
+      setRecords(filteredRecords);
     } catch (error) {
-      console.error('Error loading entries:', error);
+      console.error('Error loading records:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const formatDuration = (seconds) => {
-    const hours = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
+  const formatDuration = (minutes) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
     if (hours > 0) return `${hours}h ${mins}m`;
     return `${mins}m`;
   };
@@ -88,44 +88,17 @@ export const HistoryPage = () => {
     return projects.find(p => p.projectId === projectId);
   };
 
-  const getTypeIcon = (type) => {
-    switch (type) {
-      case 'pomodoro':
-        return <Target className="w-4 h-4 text-primary" />;
-      case 'break':
-        return <Coffee className="w-4 h-4 text-emerald-500" />;
-      default:
-        return <Clock className="w-4 h-4 text-muted-foreground" />;
-    }
-  };
-
-  const getTypeBadge = (type) => {
-    switch (type) {
-      case 'pomodoro':
-        return <Badge variant="default">Pomodoro</Badge>;
-      case 'break':
-        return <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">Descanso</Badge>;
-      default:
-        return <Badge variant="outline">Manual</Badge>;
-    }
-  };
-
-  // Group entries by date
-  const groupedEntries = entries.reduce((acc, entry) => {
-    const date = entry.date;
+  // Group records by date
+  const groupedRecords = records.reduce((acc, record) => {
+    const date = record.createdAt.split('T')[0];
     if (!acc[date]) acc[date] = [];
-    acc[date].push(entry);
+    acc[date].push(record);
     return acc;
   }, {});
 
   // Calculate totals
-  const totalPomodoros = entries.filter(e => e.type === 'pomodoro').length;
-  const totalWorkTime = entries
-    .filter(e => e.type !== 'break')
-    .reduce((sum, e) => sum + e.duration, 0);
-  const totalBreakTime = entries
-    .filter(e => e.type === 'break')
-    .reduce((sum, e) => sum + e.duration, 0);
+  const totalPomodoros = records.reduce((sum, r) => sum + (r.pomodoros || 0), 0);
+  const totalMinutes = records.reduce((sum, r) => sum + (r.durationMinutes || 0), 0);
 
   return (
     <div className="p-6 lg:p-8 space-y-8" data-testid="history-page">
@@ -169,13 +142,7 @@ export const HistoryPage = () => {
               <SelectItem value="all">Todos los proyectos</SelectItem>
               {projects.map(project => (
                 <SelectItem key={project.projectId} value={project.projectId}>
-                  <div className="flex items-center gap-2">
-                    <div 
-                      className="w-2 h-2 rounded-full" 
-                      style={{ backgroundColor: project.color }}
-                    />
-                    {project.name}
-                  </div>
+                  {project.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -229,10 +196,10 @@ export const HistoryPage = () => {
           </CardContent>
         </Card>
 
-        {/* Stats & Entries */}
+        {/* Stats & Records */}
         <div className="lg:col-span-3 space-y-6">
           {/* Summary Stats */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <Card>
               <CardContent className="p-4 text-center">
                 <div className="text-2xl font-bold text-primary">{totalPomodoros}</div>
@@ -241,20 +208,14 @@ export const HistoryPage = () => {
             </Card>
             <Card>
               <CardContent className="p-4 text-center">
-                <div className="text-2xl font-bold">{formatDuration(totalWorkTime)}</div>
-                <p className="text-sm text-muted-foreground">Trabajo</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4 text-center">
-                <div className="text-2xl font-bold text-emerald-600">{formatDuration(totalBreakTime)}</div>
-                <p className="text-sm text-muted-foreground">Descansos</p>
+                <div className="text-2xl font-bold">{formatDuration(totalMinutes)}</div>
+                <p className="text-sm text-muted-foreground">Tiempo total</p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Entries List */}
-          <Card data-testid="entries-list">
+          {/* Records List */}
+          <Card data-testid="records-list">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CalendarDays className="w-5 h-5" />
@@ -268,7 +229,7 @@ export const HistoryPage = () => {
                     <div key={i} className="h-16 bg-muted animate-pulse rounded-lg" />
                   ))}
                 </div>
-              ) : entries.length === 0 ? (
+              ) : records.length === 0 ? (
                 <div className="text-center py-8">
                   <Clock className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
                   <p className="text-muted-foreground">
@@ -277,9 +238,9 @@ export const HistoryPage = () => {
                 </div>
               ) : (
                 <div className="space-y-6">
-                  {Object.entries(groupedEntries)
+                  {Object.entries(groupedRecords)
                     .sort(([a], [b]) => new Date(b) - new Date(a))
-                    .map(([date, dateEntries]) => (
+                    .map(([date, dateRecords]) => (
                       <div key={date}>
                         <div className="flex items-center gap-2 mb-3">
                           <span className="text-sm font-medium">
@@ -289,38 +250,34 @@ export const HistoryPage = () => {
                         </div>
                         
                         <div className="space-y-2">
-                          {dateEntries.map(entry => {
-                            const project = getProjectById(entry.projectId);
+                          {dateRecords.map(record => {
+                            const project = getProjectById(record.projectId);
                             return (
                               <div
-                                key={entry.entryId}
+                                key={record.recordId}
                                 className="flex items-center justify-between p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors"
                               >
                                 <div className="flex items-center gap-3">
-                                  {getTypeIcon(entry.type)}
+                                  <Target className="w-4 h-4 text-primary" />
                                   <div>
                                     <div className="flex items-center gap-2">
-                                      {project && (
-                                        <div 
-                                          className="w-2 h-2 rounded-full"
-                                          style={{ backgroundColor: project.color }}
-                                        />
-                                      )}
                                       <span className="font-medium">
                                         {project?.name || 'Proyecto desconocido'}
                                       </span>
                                     </div>
                                     <span className="text-sm text-muted-foreground">
-                                      {format(new Date(entry.createdAt), 'HH:mm', { locale: es })}
-                                      {entry.notes && ` · ${entry.notes}`}
+                                      {format(new Date(record.createdAt), 'HH:mm', { locale: es })}
+                                      {record.notes && ` · ${record.notes}`}
                                     </span>
                                   </div>
                                 </div>
                                 
                                 <div className="flex items-center gap-3">
-                                  {getTypeBadge(entry.type)}
+                                  <Badge variant="default">
+                                    {record.pomodoros} 🍅
+                                  </Badge>
                                   <span className="font-mono text-sm font-medium">
-                                    {formatDuration(entry.duration)}
+                                    {formatDuration(record.durationMinutes)}
                                   </span>
                                 </div>
                               </div>
