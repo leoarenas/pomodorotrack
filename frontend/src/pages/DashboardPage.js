@@ -376,10 +376,13 @@ export const DashboardPage = () => {
       // Break completed - save break time
       if (selectedProject) {
         try {
-          await timeEntriesApi.create({
+          const breakMinutes = timerState === TIMER_STATES.LONG_BREAK 
+            ? Math.round(durations.long_break / 60) 
+            : Math.round(durations.break / 60);
+          await timeRecordsApi.create({
             projectId: selectedProject,
-            duration: timerState === TIMER_STATES.LONG_BREAK ? durations.long_break : durations.break,
-            type: 'break',
+            durationMinutes: breakMinutes,
+            pomodoros: 0,
             notes: 'Descanso'
           });
         } catch (error) {
