@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTimerSettings } from '../hooks/useTimerSettings';
 import { projectsApi, timeEntriesApi, statsApi } from '../lib/api';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -26,7 +27,8 @@ import {
   TrendingUp,
   CheckCircle2,
   Bell,
-  BellOff
+  BellOff,
+  SkipForward
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -38,13 +40,6 @@ const TIMER_STATES = {
   LONG_BREAK: 'long_break'
 };
 
-// Timer durations in seconds
-const DURATIONS = {
-  work: 25 * 60,
-  break: 5 * 60,
-  long_break: 15 * 60
-};
-
 // LocalStorage keys
 const STORAGE_KEYS = {
   TIMER_STATE: 'pomodorotrack_timer_state',
@@ -52,17 +47,22 @@ const STORAGE_KEYS = {
   PROJECT_ID: 'pomodorotrack_project_id',
   ACTIVITY: 'pomodorotrack_activity',
   START_TIME: 'pomodorotrack_start_time',
-  IS_RUNNING: 'pomodorotrack_is_running'
+  IS_RUNNING: 'pomodorotrack_is_running',
+  POMODORO_COUNT: 'pomodorotrack_pomodoro_count'
 };
 
 export const DashboardPage = () => {
   const { user, company } = useAuth();
+  const { settings, getDurations, playSound } = useTimerSettings();
+  const durations = getDurations();
+  
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [timerState, setTimerState] = useState(TIMER_STATES.IDLE);
-  const [timeLeft, setTimeLeft] = useState(DURATIONS.work);
+  const [timeLeft, setTimeLeft] = useState(durations.work);
   const [isRunning, setIsRunning] = useState(false);
   const [pomodorosToday, setPomodorosToday] = useState(0);
+  const [pomodoroCount, setPomodoroCount] = useState(0); // Count for long break suggestion
   const [todayStats, setTodayStats] = useState(null);
   const [weekStats, setWeekStats] = useState(null);
   const [projectStats, setProjectStats] = useState([]);
@@ -73,7 +73,13 @@ export const DashboardPage = () => {
   const [activityDescription, setActivityDescription] = useState('');
   
   const intervalRef = useRef(null);
-  const audioRef = useRef(null);
+
+  // Update timeLeft when settings change and timer is idle
+  useEffect(() => {
+    if (timerState === TIMER_STATES.IDLE) {
+      setTimeLeft(durations.work);
+    }
+  }, [durations.work, timerState]);
 
   // Request notification permission
   const requestNotificationPermission = async () => {
@@ -110,13 +116,17 @@ export const DashboardPage = () => {
     const savedActivity = localStorage.getItem(STORAGE_KEYS.ACTIVITY);
     const savedIsRunning = localStorage.getItem(STORAGE_KEYS.IS_RUNNING);
     const savedStartTime = localStorage.getItem(STORAGE_KEYS.START_TIME);
+    const savedPomodoroCount = localStorage.getItem(STORAGE_KEYS.POMODORO_COUNT);
+    
+    if (savedPomodoroCount) {
+      setPomodoroCount(parseInt(savedPomodoroCount, 10));
+    }
     
     if (savedTimerState && savedTimerState !== TIMER_STATES.IDLE) {
       setTimerState(savedTimerState);
       setActivityDescription(savedActivity || '');
       
       if (savedIsRunning === 'true' && savedStartTime) {
-        // Calculate elapsed time since page was closed
         const elapsed = Math.floor((Date.now() - parseInt(savedStartTime)) / 1000);
         const remaining = parseInt(savedTimeLeft) - elapsed;
         
@@ -124,13 +134,12 @@ export const DashboardPage = () => {
           setTimeLeft(remaining);
           setIsRunning(true);
         } else {
-          // Timer would have completed
           setTimeLeft(0);
           setTimerState(TIMER_STATES.IDLE);
           clearPersistedTimer();
         }
       } else {
-        setTimeLeft(parseInt(savedTimeLeft) || DURATIONS.work);
+        setTimeLeft(parseInt(savedTimeLeft) || durations.work);
       }
     }
     
@@ -142,9 +151,6 @@ export const DashboardPage = () => {
     if ('Notification' in window && Notification.permission === 'granted') {
       setNotificationsEnabled(true);
     }
-    
-    // Create audio element
-    audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -158,10 +164,11 @@ export const DashboardPage = () => {
     localStorage.setItem(STORAGE_KEYS.PROJECT_ID, selectedProject || '');
     localStorage.setItem(STORAGE_KEYS.ACTIVITY, activityDescription);
     localStorage.setItem(STORAGE_KEYS.IS_RUNNING, isRunning.toString());
+    localStorage.setItem(STORAGE_KEYS.POMODORO_COUNT, pomodoroCount.toString());
     if (isRunning) {
       localStorage.setItem(STORAGE_KEYS.START_TIME, Date.now().toString());
     }
-  }, [timerState, timeLeft, selectedProject, activityDescription, isRunning]);
+  }, [timerState, timeLeft, selectedProject, activityDescription, isRunning, pomodoroCount]);
 
   // Clear persisted timer
   const clearPersistedTimer = () => {
@@ -186,7 +193,6 @@ export const DashboardPage = () => {
       const response = await projectsApi.getAll();
       setProjects(response.data);
       
-      // Auto-select first project if none selected
       const savedProjectId = localStorage.getItem(STORAGE_KEYS.PROJECT_ID);
       if (response.data.length > 0) {
         if (savedProjectId && response.data.find(p => p.projectId === savedProjectId)) {
@@ -247,11 +253,11 @@ export const DashboardPage = () => {
     
     setShowActivityModal(false);
     setTimerState(TIMER_STATES.WORK);
-    setTimeLeft(DURATIONS.work);
+    setTimeLeft(durations.work);
     setIsRunning(true);
     
     toast.success(`Iniciando: ${activityDescription}`, {
-      description: '25 minutos de enfoque'
+      description: `${settings.workDuration} minutos de enfoque`
     });
   };
 
@@ -262,16 +268,33 @@ export const DashboardPage = () => {
   const resetTimer = useCallback(() => {
     setIsRunning(false);
     setTimerState(TIMER_STATES.IDLE);
-    setTimeLeft(DURATIONS.work);
+    setTimeLeft(durations.work);
     setActivityDescription('');
     clearPersistedTimer();
-  }, []);
+  }, [durations.work]);
 
   const startBreak = useCallback((isLong = false) => {
     setTimerState(isLong ? TIMER_STATES.LONG_BREAK : TIMER_STATES.BREAK);
-    setTimeLeft(isLong ? DURATIONS.long_break : DURATIONS.break);
+    setTimeLeft(isLong ? durations.long_break : durations.break);
     setIsRunning(true);
-  }, []);
+  }, [durations]);
+
+  const skipTimer = useCallback(() => {
+    setIsRunning(false);
+    if (timerState === TIMER_STATES.WORK) {
+      // Skip work session - don't count as completed
+      setTimerState(TIMER_STATES.IDLE);
+      setTimeLeft(durations.work);
+      toast.info('Sesión omitida');
+    } else {
+      // Skip break
+      setTimerState(TIMER_STATES.IDLE);
+      setTimeLeft(durations.work);
+      toast.info('Descanso omitido');
+    }
+    setActivityDescription('');
+    clearPersistedTimer();
+  }, [timerState, durations.work]);
 
   // Timer countdown effect
   useEffect(() => {
@@ -292,9 +315,7 @@ export const DashboardPage = () => {
     setIsRunning(false);
     
     // Play notification sound
-    try {
-      audioRef.current?.play();
-    } catch (e) {}
+    playSound();
     
     if (timerState === TIMER_STATES.WORK) {
       // Save completed pomodoro
@@ -302,7 +323,7 @@ export const DashboardPage = () => {
         try {
           await timeEntriesApi.create({
             projectId: selectedProject,
-            duration: DURATIONS.work,
+            duration: durations.work,
             type: 'pomodoro',
             notes: activityDescription
           });
@@ -313,19 +334,42 @@ export const DashboardPage = () => {
         }
       }
       
-      // Send notification
-      sendNotification('¡Pomodoro completado! 🍅', `"${activityDescription}" - Toma un descanso de 5 minutos`);
+      // Update pomodoro count for long break suggestion
+      const newCount = pomodoroCount + 1;
+      setPomodoroCount(newCount);
       
-      toast.success('¡Pomodoro completado! 🍅', {
-        description: `"${activityDescription}" - Toma un descanso`,
-        action: {
-          label: 'Iniciar descanso',
-          onClick: () => startBreak(false)
-        }
-      });
+      // Check if should suggest long break
+      const suggestLongBreak = newCount >= settings.pomodorosUntilLongBreak;
+      
+      // Send notification
+      sendNotification(
+        '¡Pomodoro completado! 🍅', 
+        suggestLongBreak 
+          ? `"${activityDescription}" - ¡Toma un descanso largo de ${settings.longBreakDuration} minutos!`
+          : `"${activityDescription}" - Toma un descanso de ${settings.shortBreakDuration} minutos`
+      );
+      
+      if (suggestLongBreak) {
+        setPomodoroCount(0); // Reset count
+        toast.success('¡Pomodoro completado! 🍅', {
+          description: `${newCount} pomodoros completados. ¡Toma un descanso largo!`,
+          action: {
+            label: 'Descanso largo',
+            onClick: () => startBreak(true)
+          }
+        });
+      } else {
+        toast.success('¡Pomodoro completado! 🍅', {
+          description: `"${activityDescription}" - Toma un descanso`,
+          action: {
+            label: 'Descanso',
+            onClick: () => startBreak(false)
+          }
+        });
+      }
       
       setTimerState(TIMER_STATES.IDLE);
-      setTimeLeft(DURATIONS.work);
+      setTimeLeft(durations.work);
       setActivityDescription('');
       clearPersistedTimer();
     } else {
@@ -334,7 +378,7 @@ export const DashboardPage = () => {
         try {
           await timeEntriesApi.create({
             projectId: selectedProject,
-            duration: timerState === TIMER_STATES.LONG_BREAK ? DURATIONS.long_break : DURATIONS.break,
+            duration: timerState === TIMER_STATES.LONG_BREAK ? durations.long_break : durations.break,
             type: 'break',
             notes: 'Descanso'
           });
@@ -343,7 +387,6 @@ export const DashboardPage = () => {
         }
       }
       
-      // Send notification
       sendNotification('¡Descanso terminado!', '¿Listo para otro pomodoro?');
       
       toast.success('¡Descanso terminado!', {
@@ -351,7 +394,7 @@ export const DashboardPage = () => {
       });
       
       setTimerState(TIMER_STATES.IDLE);
-      setTimeLeft(DURATIONS.work);
+      setTimeLeft(durations.work);
       clearPersistedTimer();
     }
   };
@@ -365,10 +408,10 @@ export const DashboardPage = () => {
 
   // Calculate progress percentage
   const getProgress = () => {
-    const total = timerState === TIMER_STATES.WORK ? DURATIONS.work :
-                  timerState === TIMER_STATES.BREAK ? DURATIONS.break :
-                  timerState === TIMER_STATES.LONG_BREAK ? DURATIONS.long_break :
-                  DURATIONS.work;
+    const total = timerState === TIMER_STATES.WORK ? durations.work :
+                  timerState === TIMER_STATES.BREAK ? durations.break :
+                  timerState === TIMER_STATES.LONG_BREAK ? durations.long_break :
+                  durations.work;
     return ((total - timeLeft) / total) * 100;
   };
 
@@ -474,11 +517,16 @@ export const DashboardPage = () => {
                 className="h-2"
               />
               <p className="text-center text-sm text-muted-foreground mt-2">
-                {timerState === TIMER_STATES.IDLE && 'Listo para comenzar'}
+                {timerState === TIMER_STATES.IDLE && `Listo para comenzar (${settings.workDuration} min)`}
                 {timerState === TIMER_STATES.WORK && 'Tiempo de enfoque'}
-                {timerState === TIMER_STATES.BREAK && 'Descanso corto'}
-                {timerState === TIMER_STATES.LONG_BREAK && 'Descanso largo'}
+                {timerState === TIMER_STATES.BREAK && `Descanso corto (${settings.shortBreakDuration} min)`}
+                {timerState === TIMER_STATES.LONG_BREAK && `Descanso largo (${settings.longBreakDuration} min)`}
               </p>
+              {pomodoroCount > 0 && timerState === TIMER_STATES.IDLE && (
+                <p className="text-center text-xs text-primary mt-1">
+                  {pomodoroCount}/{settings.pomodorosUntilLongBreak} para descanso largo
+                </p>
+              )}
             </div>
 
             {/* Controls */}
@@ -513,6 +561,19 @@ export const DashboardPage = () => {
               >
                 <RotateCcw className="w-5 h-5" />
               </Button>
+              
+              {timerState !== TIMER_STATES.IDLE && (
+                <Button 
+                  size="lg" 
+                  variant="outline"
+                  className="rounded-full w-12 h-12"
+                  onClick={skipTimer}
+                  data-testid="skip-timer-btn"
+                  title="Omitir"
+                >
+                  <SkipForward className="w-5 h-5" />
+                </Button>
+              )}
               
               {timerState === TIMER_STATES.IDLE && (
                 <Button 
@@ -687,7 +748,7 @@ export const DashboardPage = () => {
           <DialogHeader>
             <DialogTitle>¿En qué vas a trabajar?</DialogTitle>
             <DialogDescription>
-              Describe brevemente la actividad para este pomodoro
+              Describe brevemente la actividad para este pomodoro de {settings.workDuration} minutos
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 pt-4">
