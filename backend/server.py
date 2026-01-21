@@ -118,6 +118,26 @@ class CompanyResponse(BaseModel):
     subscriptionStatus: str
     createdAt: str
 
+# --- User Management Models ---
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    displayName: str
+    role: str = "user"  # admin or user
+
+class UserUpdate(BaseModel):
+    displayName: Optional[str] = None
+    role: Optional[str] = None  # admin or user
+
+class CompanyUserResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    uid: str
+    email: str
+    displayName: str
+    companyId: str
+    role: str
+    createdAt: str
+
 # ============== AUTH HELPERS ==============
 
 async def verify_firebase_token(token: str) -> Optional[dict]:
