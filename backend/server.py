@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 # ============== MODELS ==============
 
+# --- Auth Models ---
 class UserRegister(BaseModel):
     email: EmailStr
     password: str
@@ -48,29 +49,59 @@ class UserLogin(BaseModel):
 class CompanyCreate(BaseModel):
     name: str
 
+# --- Project Models ---
 class ProjectCreate(BaseModel):
     name: str
-    description: Optional[str] = ""
-    color: Optional[str] = "#E91E63"
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
-    description: Optional[str] = None
-    color: Optional[str] = None
-    isActive: Optional[bool] = None
 
+class ProjectResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    projectId: str
+    companyId: str
+    name: str
+    createdAt: str
+
+# --- Activity Models ---
 class ActivityCreate(BaseModel):
     projectId: str
     name: str
-    description: Optional[str] = ""
 
-class TimeEntryCreate(BaseModel):
+class ActivityResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    activityId: str
+    projectId: str
+    companyId: str
+    name: str
+
+# --- TimeRecord Models ---
+class TimeRecordCreate(BaseModel):
     projectId: str
     activityId: Optional[str] = None
-    duration: int
-    type: str = "pomodoro"
+    durationMinutes: int
+    pomodoros: int = 1
     notes: Optional[str] = ""
 
+class TimeRecordUpdate(BaseModel):
+    durationMinutes: Optional[int] = None
+    pomodoros: Optional[int] = None
+    notes: Optional[str] = None
+
+class TimeRecordResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    recordId: str
+    companyId: str
+    userId: str
+    projectId: str
+    activityId: Optional[str] = None
+    durationMinutes: int
+    pomodoros: int
+    notes: Optional[str] = ""
+    createdAt: str
+    updatedAt: str
+
+# --- User/Company Response Models ---
 class UserResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     uid: str
@@ -87,51 +118,17 @@ class CompanyResponse(BaseModel):
     subscriptionStatus: str
     createdAt: str
 
-class ProjectResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    projectId: str
-    companyId: str
-    name: str
-    description: str
-    color: str
-    isActive: bool
-    createdAt: str
-
-class ActivityResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    activityId: str
-    projectId: str
-    companyId: str
-    name: str
-    description: str
-    createdAt: str
-
-class TimeEntryResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    entryId: str
-    userId: str
-    companyId: str
-    projectId: str
-    activityId: Optional[str]
-    duration: int
-    type: str
-    notes: str
-    date: str
-    createdAt: str
-
 # ============== AUTH HELPERS ==============
 
 async def verify_firebase_token(token: str) -> Optional[dict]:
     """Verify Firebase ID token using Google's public keys"""
     try:
-        # Use Google's token info endpoint for verification
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"https://www.googleapis.com/oauth2/v3/tokeninfo?id_token={token}"
             )
             if response.status_code == 200:
                 data = response.json()
-                # Verify the audience matches our project
                 if data.get('aud') == FIREBASE_PROJECT_ID or data.get('azp'):
                     return data
     except Exception as e:
@@ -144,7 +141,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     
     token = credentials.credentials
     
-    # Try to find user by simple token first (backward compatibility)
+    # Try to find user by simple token first
     user = await db.users.find_one({"token": token}, {"_id": 0, "password": 0})
     if user:
         return user
@@ -161,7 +158,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     raise HTTPException(status_code=401, detail="Token inválido")
 
 def generate_token(uid: str) -> str:
-    """Generate a simple token for MVP"""
     return hashlib.sha256(f"{uid}-{datetime.now(timezone.utc).isoformat()}".encode()).hexdigest()
 
 # ============== AUTH ROUTES ==============
@@ -169,7 +165,6 @@ def generate_token(uid: str) -> str:
 @api_router.post("/auth/register")
 async def register(data: UserRegister):
     """Register new user and optionally create company"""
-    # Check if email already exists
     existing = await db.users.find_one({"email": data.email})
     if existing:
         raise HTTPException(status_code=400, detail="El correo ya está registrado")
@@ -182,7 +177,6 @@ async def register(data: UserRegister):
     company = None
     role = "user"
     
-    # Create company if name provided
     if data.companyName:
         companyId = str(uuid.uuid4())
         company = {
@@ -195,7 +189,6 @@ async def register(data: UserRegister):
         await db.companies.insert_one(company)
         role = "owner"
     
-    # Create user
     user_doc = {
         "uid": uid,
         "email": data.email,
@@ -228,7 +221,6 @@ async def register(data: UserRegister):
 
 @api_router.post("/auth/login")
 async def login(data: UserLogin):
-    """Login user"""
     password_hash = hashlib.sha256(data.password.encode()).hexdigest()
     user = await db.users.find_one(
         {"email": data.email, "password": password_hash},
@@ -238,11 +230,9 @@ async def login(data: UserLogin):
     if not user:
         raise HTTPException(status_code=401, detail="Credenciales inválidas")
     
-    # Generate new token
     token = generate_token(user["uid"])
     await db.users.update_one({"uid": user["uid"]}, {"$set": {"token": token}})
     
-    # Get company info
     company = None
     if user.get("companyId"):
         company = await db.companies.find_one({"companyId": user["companyId"]}, {"_id": 0})
@@ -255,7 +245,6 @@ async def login(data: UserLogin):
 
 @api_router.get("/auth/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
-    """Get current user info"""
     company = None
     if current_user.get("companyId"):
         company = await db.companies.find_one({"companyId": current_user["companyId"]}, {"_id": 0})
@@ -265,7 +254,6 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 @api_router.post("/auth/logout")
 async def logout(current_user: dict = Depends(get_current_user)):
-    """Logout - invalidate token"""
     await db.users.update_one({"uid": current_user["uid"]}, {"$set": {"token": None}})
     return {"message": "Sesión cerrada"}
 
@@ -273,7 +261,6 @@ async def logout(current_user: dict = Depends(get_current_user)):
 
 @api_router.post("/companies", response_model=CompanyResponse)
 async def create_company(data: CompanyCreate, current_user: dict = Depends(get_current_user)):
-    """Create company for user without one"""
     if current_user.get("companyId"):
         raise HTTPException(status_code=400, detail="Ya perteneces a una empresa")
     
@@ -289,7 +276,6 @@ async def create_company(data: CompanyCreate, current_user: dict = Depends(get_c
     }
     await db.companies.insert_one(company_doc)
     
-    # Update user
     await db.users.update_one(
         {"uid": current_user["uid"]},
         {"$set": {"companyId": companyId, "role": "owner"}}
@@ -299,7 +285,6 @@ async def create_company(data: CompanyCreate, current_user: dict = Depends(get_c
 
 @api_router.get("/companies/current", response_model=CompanyResponse)
 async def get_current_company(current_user: dict = Depends(get_current_user)):
-    """Get current user's company"""
     if not current_user.get("companyId"):
         raise HTTPException(status_code=404, detail="No perteneces a ninguna empresa")
     
@@ -310,10 +295,11 @@ async def get_current_company(current_user: dict = Depends(get_current_user)):
     return CompanyResponse(**company)
 
 # ============== PROJECT ROUTES ==============
+# Collection: projects
+# Fields: projectId, companyId, name, createdAt
 
 @api_router.post("/projects", response_model=ProjectResponse)
 async def create_project(data: ProjectCreate, current_user: dict = Depends(get_current_user)):
-    """Create new project"""
     if not current_user.get("companyId"):
         raise HTTPException(status_code=400, detail="Necesitas pertenecer a una empresa")
     
@@ -324,9 +310,6 @@ async def create_project(data: ProjectCreate, current_user: dict = Depends(get_c
         "projectId": projectId,
         "companyId": current_user["companyId"],
         "name": data.name,
-        "description": data.description or "",
-        "color": data.color or "#E91E63",
-        "isActive": True,
         "createdAt": now
     }
     await db.projects.insert_one(project_doc)
@@ -335,7 +318,6 @@ async def create_project(data: ProjectCreate, current_user: dict = Depends(get_c
 
 @api_router.get("/projects", response_model=List[ProjectResponse])
 async def get_projects(current_user: dict = Depends(get_current_user)):
-    """Get all projects for company"""
     if not current_user.get("companyId"):
         return []
     
@@ -346,9 +328,20 @@ async def get_projects(current_user: dict = Depends(get_current_user)):
     
     return [ProjectResponse(**p) for p in projects]
 
+@api_router.get("/projects/{project_id}", response_model=ProjectResponse)
+async def get_project(project_id: str, current_user: dict = Depends(get_current_user)):
+    project = await db.projects.find_one({
+        "projectId": project_id,
+        "companyId": current_user.get("companyId")
+    }, {"_id": 0})
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    
+    return ProjectResponse(**project)
+
 @api_router.put("/projects/{project_id}", response_model=ProjectResponse)
 async def update_project(project_id: str, data: ProjectUpdate, current_user: dict = Depends(get_current_user)):
-    """Update project"""
     project = await db.projects.find_one({
         "projectId": project_id,
         "companyId": current_user.get("companyId")
@@ -366,7 +359,6 @@ async def update_project(project_id: str, data: ProjectUpdate, current_user: dic
 
 @api_router.delete("/projects/{project_id}")
 async def delete_project(project_id: str, current_user: dict = Depends(get_current_user)):
-    """Delete project"""
     result = await db.projects.delete_one({
         "projectId": project_id,
         "companyId": current_user.get("companyId")
@@ -378,10 +370,11 @@ async def delete_project(project_id: str, current_user: dict = Depends(get_curre
     return {"message": "Proyecto eliminado"}
 
 # ============== ACTIVITY ROUTES ==============
+# Collection: activities
+# Fields: activityId, projectId, companyId, name
 
 @api_router.post("/activities", response_model=ActivityResponse)
 async def create_activity(data: ActivityCreate, current_user: dict = Depends(get_current_user)):
-    """Create new activity"""
     if not current_user.get("companyId"):
         raise HTTPException(status_code=400, detail="Necesitas pertenecer a una empresa")
     
@@ -394,15 +387,12 @@ async def create_activity(data: ActivityCreate, current_user: dict = Depends(get
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     
     activityId = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
     
     activity_doc = {
         "activityId": activityId,
         "projectId": data.projectId,
         "companyId": current_user["companyId"],
-        "name": data.name,
-        "description": data.description or "",
-        "createdAt": now
+        "name": data.name
     }
     await db.activities.insert_one(activity_doc)
     
@@ -410,7 +400,6 @@ async def create_activity(data: ActivityCreate, current_user: dict = Depends(get
 
 @api_router.get("/activities", response_model=List[ActivityResponse])
 async def get_activities(projectId: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    """Get activities, optionally filtered by project"""
     if not current_user.get("companyId"):
         return []
     
@@ -421,15 +410,28 @@ async def get_activities(projectId: Optional[str] = None, current_user: dict = D
     activities = await db.activities.find(query, {"_id": 0}).to_list(100)
     return [ActivityResponse(**a) for a in activities]
 
-# ============== TIME ENTRY ROUTES ==============
+@api_router.delete("/activities/{activity_id}")
+async def delete_activity(activity_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.activities.delete_one({
+        "activityId": activity_id,
+        "companyId": current_user.get("companyId")
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Actividad no encontrada")
+    
+    return {"message": "Actividad eliminada"}
 
-@api_router.post("/time-entries", response_model=TimeEntryResponse)
-async def create_time_entry(data: TimeEntryCreate, current_user: dict = Depends(get_current_user)):
-    """Create time entry (pomodoro or manual)"""
+# ============== TIME RECORDS ROUTES ==============
+# Collection: timeRecords
+# Fields: recordId, companyId, userId, projectId, activityId, durationMinutes, pomodoros, createdAt, updatedAt
+
+@api_router.post("/time-records", response_model=TimeRecordResponse)
+async def create_time_record(data: TimeRecordCreate, current_user: dict = Depends(get_current_user)):
     if not current_user.get("companyId"):
         raise HTTPException(status_code=400, detail="Necesitas pertenecer a una empresa")
     
-    # Verify project
+    # Verify project belongs to company
     project = await db.projects.find_one({
         "projectId": data.projectId,
         "companyId": current_user["companyId"]
@@ -437,91 +439,144 @@ async def create_time_entry(data: TimeEntryCreate, current_user: dict = Depends(
     if not project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
     
-    entryId = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
+    # Verify activity if provided
+    if data.activityId:
+        activity = await db.activities.find_one({
+            "activityId": data.activityId,
+            "companyId": current_user["companyId"]
+        })
+        if not activity:
+            raise HTTPException(status_code=404, detail="Actividad no encontrada")
     
-    entry_doc = {
-        "entryId": entryId,
-        "userId": current_user["uid"],
+    recordId = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    record_doc = {
+        "recordId": recordId,
         "companyId": current_user["companyId"],
+        "userId": current_user["uid"],
         "projectId": data.projectId,
         "activityId": data.activityId,
-        "duration": data.duration,
-        "type": data.type,
+        "durationMinutes": data.durationMinutes,
+        "pomodoros": data.pomodoros,
         "notes": data.notes or "",
-        "date": now.strftime("%Y-%m-%d"),
-        "createdAt": now.isoformat()
+        "createdAt": now,
+        "updatedAt": now
     }
-    await db.time_entries.insert_one(entry_doc)
+    await db.timeRecords.insert_one(record_doc)
     
-    return TimeEntryResponse(**entry_doc)
+    return TimeRecordResponse(**record_doc)
 
-@api_router.get("/time-entries", response_model=List[TimeEntryResponse])
-async def get_time_entries(
+@api_router.get("/time-records", response_model=List[TimeRecordResponse])
+async def get_time_records(
     projectId: Optional[str] = None,
-    date: Optional[str] = None,
+    activityId: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get time entries for current user"""
     if not current_user.get("companyId"):
         return []
     
     query = {
-        "userId": current_user["uid"],
-        "companyId": current_user["companyId"]
+        "companyId": current_user["companyId"],
+        "userId": current_user["uid"]
     }
     if projectId:
         query["projectId"] = projectId
-    if date:
-        query["date"] = date
+    if activityId:
+        query["activityId"] = activityId
     
-    entries = await db.time_entries.find(query, {"_id": 0}).sort("createdAt", -1).to_list(500)
-    return [TimeEntryResponse(**e) for e in entries]
+    records = await db.timeRecords.find(query, {"_id": 0}).sort("createdAt", -1).to_list(500)
+    return [TimeRecordResponse(**r) for r in records]
+
+@api_router.get("/time-records/{record_id}", response_model=TimeRecordResponse)
+async def get_time_record(record_id: str, current_user: dict = Depends(get_current_user)):
+    record = await db.timeRecords.find_one({
+        "recordId": record_id,
+        "companyId": current_user.get("companyId"),
+        "userId": current_user["uid"]
+    }, {"_id": 0})
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    
+    return TimeRecordResponse(**record)
+
+@api_router.put("/time-records/{record_id}", response_model=TimeRecordResponse)
+async def update_time_record(record_id: str, data: TimeRecordUpdate, current_user: dict = Depends(get_current_user)):
+    record = await db.timeRecords.find_one({
+        "recordId": record_id,
+        "companyId": current_user.get("companyId"),
+        "userId": current_user["uid"]
+    })
+    
+    if not record:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    update_data["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.timeRecords.update_one({"recordId": record_id}, {"$set": update_data})
+    
+    updated = await db.timeRecords.find_one({"recordId": record_id}, {"_id": 0})
+    return TimeRecordResponse(**updated)
+
+@api_router.delete("/time-records/{record_id}")
+async def delete_time_record(record_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.timeRecords.delete_one({
+        "recordId": record_id,
+        "companyId": current_user.get("companyId"),
+        "userId": current_user["uid"]
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Registro no encontrado")
+    
+    return {"message": "Registro eliminado"}
 
 # ============== STATS ROUTES ==============
 
 @api_router.get("/stats/today")
 async def get_today_stats(current_user: dict = Depends(get_current_user)):
-    """Get stats for today"""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
-    entries = await db.time_entries.find({
+    # Get records from today
+    records = await db.timeRecords.find({
         "userId": current_user["uid"],
-        "date": today
+        "companyId": current_user.get("companyId"),
+        "createdAt": {"$regex": f"^{today}"}
     }, {"_id": 0}).to_list(100)
     
-    pomodoros = [e for e in entries if e.get("type") == "pomodoro"]
-    total_time = sum(e.get("duration", 0) for e in entries if e.get("type") != "break")
-    break_time = sum(e.get("duration", 0) for e in entries if e.get("type") == "break")
+    total_pomodoros = sum(r.get("pomodoros", 0) for r in records)
+    total_minutes = sum(r.get("durationMinutes", 0) for r in records)
     
     return {
         "date": today,
-        "pomodorosCompleted": len(pomodoros),
-        "totalWorkTime": total_time,
-        "breakTime": break_time,
-        "entriesCount": len(entries)
+        "pomodorosCompleted": total_pomodoros,
+        "totalWorkTime": total_minutes * 60,  # Convert to seconds for frontend compatibility
+        "totalMinutes": total_minutes,
+        "recordsCount": len(records)
     }
 
 @api_router.get("/stats/week")
 async def get_week_stats(current_user: dict = Depends(get_current_user)):
-    """Get stats for current week"""
     from datetime import timedelta
     
     today = datetime.now(timezone.utc)
     week_start = today - timedelta(days=today.weekday())
     dates = [(week_start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
     
-    entries = await db.time_entries.find({
+    # Get all records for the week
+    records = await db.timeRecords.find({
         "userId": current_user["uid"],
-        "date": {"$in": dates}
+        "companyId": current_user.get("companyId")
     }, {"_id": 0}).to_list(500)
     
     daily_stats = {}
     for date in dates:
-        day_entries = [e for e in entries if e.get("date") == date]
+        day_records = [r for r in records if r.get("createdAt", "").startswith(date)]
         daily_stats[date] = {
-            "pomodoros": len([e for e in day_entries if e.get("type") == "pomodoro"]),
-            "totalTime": sum(e.get("duration", 0) for e in day_entries if e.get("type") != "break")
+            "pomodoros": sum(r.get("pomodoros", 0) for r in day_records),
+            "totalTime": sum(r.get("durationMinutes", 0) for r in day_records) * 60
         }
     
     total_pomodoros = sum(d["pomodoros"] for d in daily_stats.values())
@@ -537,14 +592,12 @@ async def get_week_stats(current_user: dict = Depends(get_current_user)):
 
 @api_router.get("/stats/by-project")
 async def get_project_stats(current_user: dict = Depends(get_current_user)):
-    """Get time breakdown by project"""
     if not current_user.get("companyId"):
         return []
     
-    entries = await db.time_entries.find({
+    records = await db.timeRecords.find({
         "userId": current_user["uid"],
-        "companyId": current_user["companyId"],
-        "type": {"$ne": "break"}
+        "companyId": current_user["companyId"]
     }, {"_id": 0}).to_list(1000)
     
     projects = await db.projects.find(
@@ -555,20 +608,21 @@ async def get_project_stats(current_user: dict = Depends(get_current_user)):
     project_map = {p["projectId"]: p for p in projects}
     
     stats = {}
-    for entry in entries:
-        pid = entry.get("projectId")
+    for record in records:
+        pid = record.get("projectId")
         if pid not in stats:
             project = project_map.get(pid, {})
             stats[pid] = {
                 "projectId": pid,
                 "projectName": project.get("name", "Desconocido"),
-                "color": project.get("color", "#E91E63"),
+                "color": "#E91E63",  # Default color
                 "totalTime": 0,
+                "totalMinutes": 0,
                 "pomodoros": 0
             }
-        stats[pid]["totalTime"] += entry.get("duration", 0)
-        if entry.get("type") == "pomodoro":
-            stats[pid]["pomodoros"] += 1
+        stats[pid]["totalMinutes"] += record.get("durationMinutes", 0)
+        stats[pid]["totalTime"] = stats[pid]["totalMinutes"] * 60
+        stats[pid]["pomodoros"] += record.get("pomodoros", 0)
     
     return list(stats.values())
 
@@ -576,7 +630,7 @@ async def get_project_stats(current_user: dict = Depends(get_current_user)):
 
 @api_router.get("/")
 async def root():
-    return {"message": "PomodoroTrack API", "status": "running"}
+    return {"message": "PomodoroTrack API", "status": "running", "version": "1.2.0"}
 
 @api_router.get("/health")
 async def health():
