@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { authApi, companyApi } from '../lib/api';
 
 const AuthContext = createContext(null);
@@ -12,27 +12,43 @@ export const useAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
+  // Initialize state from localStorage
   const [user, setUser] = useState(() => {
-    // Initialize from localStorage to prevent flash
-    const savedUser = localStorage.getItem('user');
-    return savedUser ? JSON.parse(savedUser) : null;
+    try {
+      const savedUser = localStorage.getItem('user');
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch {
+      return null;
+    }
   });
   
   const [company, setCompany] = useState(() => {
-    const savedCompany = localStorage.getItem('company');
-    return savedCompany ? JSON.parse(savedCompany) : null;
+    try {
+      const savedCompany = localStorage.getItem('company');
+      return savedCompany ? JSON.parse(savedCompany) : null;
+    } catch {
+      return null;
+    }
   });
   
   const [loading, setLoading] = useState(true);
-  const [authChecked, setAuthChecked] = useState(false);
+  const authCheckRef = useRef(false);
 
-  const checkAuth = useCallback(async () => {
+  // Check auth only once on mount
+  useEffect(() => {
+    if (!authCheckRef.current) {
+      authCheckRef.current = true;
+      checkAuth();
+    }
+  }, []);
+
+  const checkAuth = async () => {
     const token = localStorage.getItem('authToken');
+    
     if (!token) {
       setUser(null);
       setCompany(null);
       setLoading(false);
-      setAuthChecked(true);
       return;
     }
 
@@ -44,14 +60,15 @@ export const AuthProvider = ({ children }) => {
       setUser(userData);
       setCompany(companyData);
       
-      // Update localStorage
+      // Update localStorage with fresh data
       localStorage.setItem('user', JSON.stringify(userData));
       if (companyData) {
         localStorage.setItem('company', JSON.stringify(companyData));
       }
     } catch (error) {
       console.error('Auth check failed:', error);
-      // Only clear if it's a real auth error, not a network error
+      
+      // Only clear if it's definitely a 401
       if (error.response?.status === 401) {
         localStorage.removeItem('authToken');
         localStorage.removeItem('user');
@@ -59,30 +76,24 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         setCompany(null);
       }
-      // If network error, keep existing state from localStorage
+      // On network errors, keep existing localStorage state
     } finally {
       setLoading(false);
-      setAuthChecked(true);
     }
-  }, []);
-
-  useEffect(() => {
-    if (!authChecked) {
-      checkAuth();
-    }
-  }, [authChecked, checkAuth]);
+  };
 
   const login = async (email, password) => {
-    // Use backend authentication
     const response = await authApi.login({ email, password });
     const { token, user: userData, company: companyData } = response.data;
     
+    // Save to localStorage first
     localStorage.setItem('authToken', token);
     localStorage.setItem('user', JSON.stringify(userData));
     if (companyData) {
       localStorage.setItem('company', JSON.stringify(companyData));
     }
     
+    // Then update state
     setUser(userData);
     setCompany(companyData);
     
@@ -90,7 +101,6 @@ export const AuthProvider = ({ children }) => {
   };
 
   const register = async (email, password, displayName, companyName) => {
-    // Register in backend
     const response = await authApi.register({
       email,
       password,
@@ -99,43 +109,54 @@ export const AuthProvider = ({ children }) => {
     });
     const { token, user: userData, company: companyData } = response.data;
     
+    // Save to localStorage first
     localStorage.setItem('authToken', token);
     localStorage.setItem('user', JSON.stringify(userData));
     if (companyData) {
       localStorage.setItem('company', JSON.stringify(companyData));
     }
     
+    // Then update state
     setUser(userData);
     setCompany(companyData);
     
     return response.data;
   };
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await authApi.logout();
     } catch (error) {
-      // Ignore errors
+      // Ignore logout errors
     }
     
+    // Clear localStorage
     localStorage.removeItem('authToken');
     localStorage.removeItem('user');
     localStorage.removeItem('company');
+    
+    // Clear state
     setUser(null);
     setCompany(null);
-  };
+  }, []);
 
   const createCompany = async (name) => {
     const response = await companyApi.create({ name });
     const companyData = response.data;
     
-    setCompany(companyData);
+    // Update localStorage and state
     localStorage.setItem('company', JSON.stringify(companyData));
+    setCompany(companyData);
     
     // Refresh user data to get updated role
-    const userResponse = await authApi.getMe();
-    setUser(userResponse.data.user);
-    localStorage.setItem('user', JSON.stringify(userResponse.data.user));
+    try {
+      const userResponse = await authApi.getMe();
+      const updatedUser = userResponse.data.user;
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      setUser(updatedUser);
+    } catch (e) {
+      console.error('Error refreshing user data:', e);
+    }
     
     return companyData;
   };
@@ -144,7 +165,7 @@ export const AuthProvider = ({ children }) => {
     user,
     company,
     loading,
-    isAuthenticated: !!user,
+    isAuthenticated: !!user && !!localStorage.getItem('authToken'),
     hasCompany: !!company,
     login,
     register,
