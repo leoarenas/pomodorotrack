@@ -4,7 +4,6 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Textarea } from '../components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -19,7 +18,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu';
-import { Badge } from '../components/ui/badge';
 import { 
   Plus, 
   MoreVertical, 
@@ -28,13 +26,6 @@ import {
   FolderOpen
 } from 'lucide-react';
 import { toast } from 'sonner';
-
-const PROJECT_COLORS = [
-  '#E91E63', '#9C27B0', '#673AB7', '#3F51B5', 
-  '#2196F3', '#00BCD4', '#009688', '#4CAF50',
-  '#8BC34A', '#CDDC39', '#FFC107', '#FF9800',
-  '#FF5722', '#795548', '#607D8B'
-];
 
 export const ProjectsPage = () => {
   const [projects, setProjects] = useState([]);
@@ -45,8 +36,6 @@ export const ProjectsPage = () => {
   
   // Form state
   const [formName, setFormName] = useState('');
-  const [formDescription, setFormDescription] = useState('');
-  const [formColor, setFormColor] = useState('#E91E63');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -66,21 +55,15 @@ export const ProjectsPage = () => {
 
   const resetForm = () => {
     setFormName('');
-    setFormDescription('');
-    setFormColor('#E91E63');
   };
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (isSubmitting) return;
+    if (isSubmitting || !formName.trim()) return;
     setIsSubmitting(true);
     
     try {
-      await projectsApi.create({
-        name: formName,
-        description: formDescription,
-        color: formColor
-      });
+      await projectsApi.create({ name: formName });
       toast.success('Proyecto creado');
       setIsCreateOpen(false);
       resetForm();
@@ -99,15 +82,11 @@ export const ProjectsPage = () => {
 
   const handleEdit = async (e) => {
     e.preventDefault();
-    if (!editingProject || isSubmitting) return;
+    if (!editingProject || isSubmitting || !formName.trim()) return;
     setIsSubmitting(true);
     
     try {
-      await projectsApi.update(editingProject.projectId, {
-        name: formName,
-        description: formDescription,
-        color: formColor
-      });
+      await projectsApi.update(editingProject.projectId, { name: formName });
       toast.success('Proyecto actualizado');
       setIsEditOpen(false);
       setEditingProject(null);
@@ -135,8 +114,6 @@ export const ProjectsPage = () => {
   const openEditDialog = (project) => {
     setEditingProject(project);
     setFormName(project.name);
-    setFormDescription(project.description);
-    setFormColor(project.color);
     setIsEditOpen(true);
   };
 
@@ -160,7 +137,7 @@ export const ProjectsPage = () => {
           <div className="h-8 bg-muted rounded w-48" />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3].map(i => (
-              <div key={i} className="h-40 bg-muted rounded-lg" />
+              <div key={i} className="h-32 bg-muted rounded-lg" />
             ))}
           </div>
         </div>
@@ -207,35 +184,6 @@ export const ProjectsPage = () => {
                 />
               </div>
               
-              <div className="space-y-2">
-                <Label htmlFor="create-project-description">Descripción (opcional)</Label>
-                <Textarea
-                  id="create-project-description"
-                  data-testid="project-description-input"
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  placeholder="Describe tu proyecto..."
-                  rows={3}
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label>Color</Label>
-                <div className="flex flex-wrap gap-2">
-                  {PROJECT_COLORS.map(color => (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => setFormColor(color)}
-                      className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
-                        formColor === color ? 'ring-2 ring-offset-2 ring-foreground' : ''
-                      }`}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
-                </div>
-              </div>
-              
               <Button 
                 type="submit" 
                 className="w-full btn-primary" 
@@ -272,24 +220,13 @@ export const ProjectsPage = () => {
               className="card-hover relative overflow-hidden"
               data-testid={`project-card-${project.projectId}`}
             >
-              <div 
-                className="absolute top-0 left-0 right-0 h-1"
-                style={{ backgroundColor: project.color }}
-              />
+              <div className="absolute top-0 left-0 right-0 h-1 bg-primary" />
               <CardHeader className="flex flex-row items-start justify-between pb-2">
-                <div className="space-y-1">
+                <div className="space-y-1 flex-1">
                   <CardTitle className="flex items-center gap-2">
-                    <div 
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: project.color }}
-                    />
+                    <div className="w-3 h-3 rounded-full bg-primary" />
                     {project.name}
                   </CardTitle>
-                  {project.description && (
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      {project.description}
-                    </p>
-                  )}
                 </div>
                 
                 <DropdownMenu>
@@ -314,14 +251,9 @@ export const ProjectsPage = () => {
                 </DropdownMenu>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center gap-2">
-                  <Badge variant={project.isActive ? 'default' : 'secondary'}>
-                    {project.isActive ? 'Activo' : 'Inactivo'}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    Creado {new Date(project.createdAt).toLocaleDateString('es')}
-                  </span>
-                </div>
+                <span className="text-xs text-muted-foreground">
+                  Creado {new Date(project.createdAt).toLocaleDateString('es')}
+                </span>
               </CardContent>
             </Card>
           ))}
@@ -334,7 +266,7 @@ export const ProjectsPage = () => {
           <DialogHeader>
             <DialogTitle>Editar Proyecto</DialogTitle>
             <DialogDescription>
-              Actualiza la información de tu proyecto
+              Actualiza el nombre de tu proyecto
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleEdit} className="space-y-4">
@@ -348,34 +280,6 @@ export const ProjectsPage = () => {
                 autoFocus
                 required
               />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="edit-project-description">Descripción (opcional)</Label>
-              <Textarea
-                id="edit-project-description"
-                value={formDescription}
-                onChange={(e) => setFormDescription(e.target.value)}
-                placeholder="Describe tu proyecto..."
-                rows={3}
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Color</Label>
-              <div className="flex flex-wrap gap-2">
-                {PROJECT_COLORS.map(color => (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => setFormColor(color)}
-                    className={`w-8 h-8 rounded-full transition-transform hover:scale-110 ${
-                      formColor === color ? 'ring-2 ring-offset-2 ring-foreground' : ''
-                    }`}
-                    style={{ backgroundColor: color }}
-                  />
-                ))}
-              </div>
             </div>
             
             <Button 
