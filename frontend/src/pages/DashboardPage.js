@@ -321,10 +321,10 @@ export const DashboardPage = () => {
       // Save completed pomodoro
       if (selectedProject) {
         try {
-          await timeEntriesApi.create({
+          await timeRecordsApi.create({
             projectId: selectedProject,
-            duration: durations.work,
-            type: 'pomodoro',
+            durationMinutes: Math.round(durations.work / 60),
+            pomodoros: 1,
             notes: activityDescription
           });
           setPomodorosToday(prev => prev + 1);
