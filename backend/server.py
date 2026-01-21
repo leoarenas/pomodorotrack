@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -10,8 +10,8 @@ from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone
-import httpx
 import hashlib
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -21,9 +21,8 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Firebase config
-FIREBASE_API_KEY = os.environ.get('FIREBASE_API_KEY', '')
-FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', '')
+# Firebase config for token verification
+FIREBASE_PROJECT_ID = os.environ.get('FIREBASE_PROJECT_ID', 'pomodorotrack')
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -40,6 +39,7 @@ class UserRegister(BaseModel):
     password: str
     displayName: str
     companyName: Optional[str] = None
+    firebaseUid: Optional[str] = None
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -67,8 +67,8 @@ class ActivityCreate(BaseModel):
 class TimeEntryCreate(BaseModel):
     projectId: str
     activityId: Optional[str] = None
-    duration: int  # in seconds
-    type: str = "pomodoro"  # pomodoro, manual, break
+    duration: int
+    type: str = "pomodoro"
     notes: Optional[str] = ""
 
 class UserResponse(BaseModel):
@@ -121,19 +121,47 @@ class TimeEntryResponse(BaseModel):
 
 # ============== AUTH HELPERS ==============
 
+async def verify_firebase_token(token: str) -> Optional[dict]:
+    """Verify Firebase ID token using Google's public keys"""
+    try:
+        # Use Google's token info endpoint for verification
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://www.googleapis.com/oauth2/v3/tokeninfo?id_token={token}"
+            )
+            if response.status_code == 200:
+                data = response.json()
+                # Verify the audience matches our project
+                if data.get('aud') == FIREBASE_PROJECT_ID or data.get('azp'):
+                    return data
+    except Exception as e:
+        logger.error(f"Firebase token verification error: {e}")
+    return None
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials:
         raise HTTPException(status_code=401, detail="No autorizado")
     
     token = credentials.credentials
-    # Find user by token (simple token-based auth for MVP)
-    user = await db.users.find_one({"token": token}, {"_id": 0})
-    if not user:
-        raise HTTPException(status_code=401, detail="Token inválido")
-    return user
+    
+    # Try to find user by simple token first (backward compatibility)
+    user = await db.users.find_one({"token": token}, {"_id": 0, "password": 0})
+    if user:
+        return user
+    
+    # Try Firebase token verification
+    firebase_data = await verify_firebase_token(token)
+    if firebase_data:
+        email = firebase_data.get('email')
+        if email:
+            user = await db.users.find_one({"email": email}, {"_id": 0, "password": 0})
+            if user:
+                return user
+    
+    raise HTTPException(status_code=401, detail="Token inválido")
 
 def generate_token(uid: str) -> str:
-    """Generate a simple token for MVP (replace with JWT in production)"""
+    """Generate a simple token for MVP"""
     return hashlib.sha256(f"{uid}-{datetime.now(timezone.utc).isoformat()}".encode()).hexdigest()
 
 # ============== AUTH ROUTES ==============
@@ -146,7 +174,7 @@ async def register(data: UserRegister):
     if existing:
         raise HTTPException(status_code=400, detail="El correo ya está registrado")
     
-    uid = str(uuid.uuid4())
+    uid = data.firebaseUid or str(uuid.uuid4())
     token = generate_token(uid)
     now = datetime.now(timezone.utc).isoformat()
     
@@ -176,6 +204,7 @@ async def register(data: UserRegister):
         "companyId": companyId,
         "role": role,
         "token": token,
+        "firebaseUid": data.firebaseUid,
         "createdAt": now
     }
     await db.users.insert_one(user_doc)
@@ -512,14 +541,12 @@ async def get_project_stats(current_user: dict = Depends(get_current_user)):
     if not current_user.get("companyId"):
         return []
     
-    # Get all entries for user
     entries = await db.time_entries.find({
         "userId": current_user["uid"],
         "companyId": current_user["companyId"],
         "type": {"$ne": "break"}
     }, {"_id": 0}).to_list(1000)
     
-    # Get projects
     projects = await db.projects.find(
         {"companyId": current_user["companyId"]},
         {"_id": 0}
@@ -527,7 +554,6 @@ async def get_project_stats(current_user: dict = Depends(get_current_user)):
     
     project_map = {p["projectId"]: p for p in projects}
     
-    # Aggregate by project
     stats = {}
     for entry in entries:
         pid = entry.get("projectId")
