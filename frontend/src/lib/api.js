@@ -20,17 +20,13 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle auth errors - but don't auto-redirect
+// Handle auth errors
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Only clear local storage on 401, but don't force redirect
-    // Let the AuthContext handle redirects gracefully
     if (error.response?.status === 401) {
-      // Check if this is NOT a login/register request
       const url = error.config?.url || '';
       if (!url.includes('/auth/login') && !url.includes('/auth/register')) {
-        // Don't redirect automatically - let components handle it
         console.warn('Auth error 401 - token may be invalid');
       }
     }
@@ -53,23 +49,31 @@ export const companyApi = {
 };
 
 // Projects API
+// Collection: projects (projectId, companyId, name, createdAt)
 export const projectsApi = {
   getAll: () => api.get('/projects'),
+  getById: (id) => api.get(`/projects/${id}`),
   create: (data) => api.post('/projects', data),
   update: (id, data) => api.put(`/projects/${id}`, data),
   delete: (id) => api.delete(`/projects/${id}`),
 };
 
 // Activities API
+// Collection: activities (activityId, projectId, companyId, name)
 export const activitiesApi = {
   getAll: (projectId) => api.get('/activities', { params: { projectId } }),
   create: (data) => api.post('/activities', data),
+  delete: (id) => api.delete(`/activities/${id}`),
 };
 
-// Time Entries API
-export const timeEntriesApi = {
-  getAll: (params) => api.get('/time-entries', { params }),
-  create: (data) => api.post('/time-entries', data),
+// Time Records API
+// Collection: timeRecords (recordId, companyId, userId, projectId, activityId, durationMinutes, pomodoros, createdAt, updatedAt)
+export const timeRecordsApi = {
+  getAll: (params) => api.get('/time-records', { params }),
+  getById: (id) => api.get(`/time-records/${id}`),
+  create: (data) => api.post('/time-records', data),
+  update: (id, data) => api.put(`/time-records/${id}`, data),
+  delete: (id) => api.delete(`/time-records/${id}`),
 };
 
 // Stats API
