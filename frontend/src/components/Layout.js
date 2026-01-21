@@ -11,22 +11,28 @@ import {
   LogOut,
   Menu,
   X,
-  Building2
+  Building2,
+  Users
 } from 'lucide-react';
 import { toast } from 'sonner';
-
-const navItems = [
-  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/projects', icon: FolderKanban, label: 'Proyectos' },
-  { path: '/history', icon: Clock, label: 'Historial' },
-  { path: '/settings', icon: Settings, label: 'Configuración' },
-];
 
 export const Layout = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, company, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Check if user can manage users (owner or admin)
+  const canManageUsers = user?.role === 'owner' || user?.role === 'admin';
+
+  // Build nav items dynamically based on user role
+  const navItems = [
+    { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+    { path: '/projects', icon: FolderKanban, label: 'Proyectos' },
+    { path: '/history', icon: Clock, label: 'Historial' },
+    ...(canManageUsers ? [{ path: '/users', icon: Users, label: 'Usuarios' }] : []),
+    { path: '/settings', icon: Settings, label: 'Configuración' },
+  ];
 
   const handleLogout = async () => {
     await logout();
